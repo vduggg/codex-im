@@ -155,7 +155,7 @@ function formatCardActionFailureText(error) {
       `- \`${nodePath}\``,
       "",
       "授权后在 Mac 上重启 Feishu 桥：",
-      "`launchctl kickstart -k gui/$(id -u)/com.yuyan.feishu-bridge`",
+      "`launchctl kickstart -k gui/$(id -u)/com.yuan.feishu-bridge`",
     ].join("\n");
   }
   return formatFailureText("处理失败", error);

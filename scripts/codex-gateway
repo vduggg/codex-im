@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LABEL="com.yuyan.feishu-bridge"
+LABEL="com.yuan.feishu-bridge"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 DOMAIN="gui/$(id -u)"
 SERVICE="${DOMAIN}/${LABEL}"
@@ -25,7 +25,7 @@ Usage:
   codex-gateway start
   codex-gateway logs
 
-This controls only com.yuyan.feishu-bridge. It does not stop or modify
+This controls only com.yuan.feishu-bridge. It does not stop or modify
 the Codex desktop app.
 USAGE
 }

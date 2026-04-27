@@ -135,7 +135,7 @@ npm run feishu-bot
 
 ## Gateway 控制
 
-本插件作为独立的 Yuan Feishu Gateway 运行。当前兼容期内，LaunchAgent 仍使用旧名称 `com.yuyan.feishu-bridge`，避免改名影响现有运行链路。
+本插件作为独立的 Yuan Feishu Gateway 运行，LaunchAgent 名称为 `com.yuan.feishu-bridge`。
 它只控制飞书桥接进程，不会停止或修改 Codex 桌面端。
 
 短命令：
