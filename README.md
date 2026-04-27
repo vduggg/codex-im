@@ -1,8 +1,8 @@
-# codex-im
+# yuan-feishu
 
 本项目完全通过Vibe Coding实现，主要特点：手机聊的电脑能继续聊，电脑聊的手机也能继续聊。在手机上可以使用命令或飞书的卡片来进行交互，快速切换项目和线程
 
-`codex-im` 是一个本地运行的飞书机器人桥接层：
+`yuan-feishu` 是我们私有化的本地飞书机器人桥接层：
 
 `飞书消息 -> 本机 codex app-server -> 飞书回复`
 
@@ -33,8 +33,8 @@ Codex 操作都留在 本地，飞书只负责消息交互。
 npm安装和执行：
 
 ```sh
-npm install -g @vdug/codex-im
-codex-im feishu-bot
+npm install -g yuan-feishu
+yuan-feishu feishu-bot
 ```
 
 开发态运行：
@@ -49,8 +49,8 @@ npm run feishu-bot
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-npm install -g @vdug/codex-im
-codex-im feishu-bot
+npm install -g yuan-feishu
+yuan-feishu feishu-bot
 ```
 
 ## 配置
@@ -135,7 +135,7 @@ npm run feishu-bot
 
 ## Gateway 控制
 
-本插件作为独立的 Codex-Feishu Gateway 运行，LaunchAgent 名称为 `com.yuyan.feishu-bridge`。
+本插件作为独立的 Yuan Feishu Gateway 运行。当前兼容期内，LaunchAgent 仍使用旧名称 `com.yuyan.feishu-bridge`，避免改名影响现有运行链路。
 它只控制飞书桥接进程，不会停止或修改 Codex 桌面端。
 
 短命令：

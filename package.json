@@ -1,16 +1,8 @@
 {
-  "name": "@vdug/codex-im",
+  "name": "yuan-feishu",
   "version": "0.2.2",
-  "description": "Feishu-first local bridge for Codex.",
+  "description": "Private Yuan Feishu bridge for local Codex.",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Ben-Lee-2019/codex-im.git"
-  },
-  "homepage": "https://github.com/Ben-Lee-2019/codex-im#readme",
-  "bugs": {
-    "url": "https://github.com/Ben-Lee-2019/codex-im/issues"
-  },
   "type": "commonjs",
   "main": "src/index.js",
   "keywords": [
@@ -31,6 +23,7 @@
     "node": ">=18"
   },
   "bin": {
+    "yuan-feishu": "./bin/codex-im.js",
     "codex-im": "./bin/codex-im.js"
   },
   "publishConfig": {

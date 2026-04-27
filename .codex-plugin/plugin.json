@@ -1,7 +1,7 @@
 {
-  "name": "yuyan-codex-im",
+  "name": "yuan-feishu",
   "version": "0.1.0",
-  "description": "予安版 Codex-IM 飞书入口骨架",
-  "author": "Codex + Jiao",
+  "description": "Yuan private Codex-Feishu bridge",
+  "author": "Jiao + Yuan",
   "entry": "README.md"
 }

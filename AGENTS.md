@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repository is the private runtime version of the Codex-to-Feishu bridge on this machine.
+This repository is the private runtime version of `yuan-feishu`, the Codex-to-Feishu bridge on this machine.
 
 ## Boundary
 
