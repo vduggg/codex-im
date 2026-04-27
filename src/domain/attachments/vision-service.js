@@ -3,7 +3,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
-async function summarizeImage({ config, filePath, contentType, userText = "", workspaceRoot = "" }) {
+async function summarizeImage({ config, filePath, contentType, userText = "", workspaceRoot = "", model = "" }) {
   const visionConfig = config.vision || {};
   if (visionConfig.enabled === false) {
     throw new Error("Vision is disabled. Set CODEX_IM_VISION_ENABLED=true to enable image understanding.");
@@ -15,6 +15,7 @@ async function summarizeImage({ config, filePath, contentType, userText = "", wo
       filePath,
       userText,
       workspaceRoot,
+      model,
     });
   }
   return summarizeImageWithResponsesApi({
@@ -80,9 +81,9 @@ async function summarizeImageWithResponsesApi({ visionConfig, filePath, contentT
   }
 }
 
-async function summarizeImageWithCodexCli({ visionConfig, filePath, userText, workspaceRoot }) {
+async function summarizeImageWithCodexCli({ visionConfig, filePath, userText, workspaceRoot, model }) {
   const command = visionConfig.codexCommand || "codex";
-  const model = visionConfig.model || "gpt-5.5";
+  const resolvedModel = String(model || visionConfig.model || "").trim();
   const timeoutMs = Number(visionConfig.timeoutMs || 60000);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "yuan-feishu-vision-"));
   const outputPath = path.join(tempDir, "summary.txt");
@@ -93,8 +94,6 @@ async function summarizeImageWithCodexCli({ visionConfig, filePath, userText, wo
     cwd,
     "--skip-git-repo-check",
     "--ephemeral",
-    "--model",
-    model,
     "--image",
     filePath,
     "-o",
@@ -104,6 +103,9 @@ async function summarizeImageWithCodexCli({ visionConfig, filePath, userText, wo
     "--",
     buildVisionPrompt(userText),
   ];
+  if (resolvedModel) {
+    args.splice(7, 0, "--model", resolvedModel);
+  }
 
   try {
     await runCommand(command, args, { timeoutMs });

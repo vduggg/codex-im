@@ -28,6 +28,11 @@ async function onFeishuTextEvent(runtime, event) {
     return;
   }
   const { bindingKey, workspaceRoot } = workspaceContext;
+  const codexParams = runtime.getCodexParamsForWorkspace(bindingKey, workspaceRoot);
+  normalized = {
+    ...normalized,
+    codexModel: codexParams.model || runtime.config.defaultCodexModel || "",
+  };
   if (normalized.command === "image_message") {
     normalized = await attachmentRuntime.prepareImageMessage(runtime, normalized, { workspaceRoot });
     if (!normalized) {

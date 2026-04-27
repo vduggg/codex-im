@@ -35,6 +35,7 @@ async function prepareImageMessage(runtime, normalized, { workspaceRoot = "" } =
       contentType,
       userText: normalized.text,
       workspaceRoot,
+      model: normalized.codexModel || "",
     });
     return buildImageNormalizedMessage({
       normalized,
