@@ -27,13 +27,13 @@ async function onFeishuTextEvent(runtime, event) {
   if (!workspaceContext) {
     return;
   }
+  const { bindingKey, workspaceRoot } = workspaceContext;
   if (normalized.command === "image_message") {
-    normalized = await attachmentRuntime.prepareImageMessage(runtime, normalized);
+    normalized = await attachmentRuntime.prepareImageMessage(runtime, normalized, { workspaceRoot });
     if (!normalized) {
       return;
     }
   }
-  const { bindingKey, workspaceRoot } = workspaceContext;
   const { threadId } = await runtime.resolveWorkspaceThreadState({
     bindingKey,
     workspaceRoot,

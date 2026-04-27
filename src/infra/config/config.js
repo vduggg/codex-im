@@ -32,9 +32,11 @@ function readConfig() {
     maxImageBytes: readPositiveIntEnv("CODEX_IM_MAX_IMAGE_BYTES", 10 * 1024 * 1024),
     vision: {
       enabled: readBooleanEnv("CODEX_IM_VISION_ENABLED", true),
+      provider: readTextEnv("CODEX_IM_VISION_PROVIDER") || "codex-cli",
+      codexCommand: readTextEnv("CODEX_IM_VISION_CODEX_COMMAND") || readTextEnv("CODEX_IM_CODEX_COMMAND") || "codex",
       apiKey: readTextEnv("CODEX_IM_VISION_API_KEY") || readTextEnv("OPENAI_API_KEY"),
       baseUrl: readTextEnv("CODEX_IM_VISION_BASE_URL") || readTextEnv("OPENAI_BASE_URL") || "https://api.openai.com/v1",
-      model: readTextEnv("CODEX_IM_VISION_MODEL") || "gpt-4.1-mini",
+      model: readTextEnv("CODEX_IM_VISION_MODEL") || readTextEnv("CODEX_IM_DEFAULT_CODEX_MODEL") || "gpt-5.5",
       timeoutMs: readPositiveIntEnv("CODEX_IM_VISION_TIMEOUT_MS", 60000),
       maxOutputTokens: readPositiveIntEnv("CODEX_IM_VISION_MAX_OUTPUT_TOKENS", 800),
     },

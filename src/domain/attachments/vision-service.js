@@ -1,10 +1,31 @@
 const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { spawn } = require("child_process");
 
-async function summarizeImage({ config, filePath, contentType, userText = "" }) {
+async function summarizeImage({ config, filePath, contentType, userText = "", workspaceRoot = "" }) {
   const visionConfig = config.vision || {};
   if (visionConfig.enabled === false) {
     throw new Error("Vision is disabled. Set CODEX_IM_VISION_ENABLED=true to enable image understanding.");
   }
+  const provider = normalizeVisionProvider(visionConfig.provider);
+  if (provider === "codex-cli") {
+    return summarizeImageWithCodexCli({
+      visionConfig,
+      filePath,
+      userText,
+      workspaceRoot,
+    });
+  }
+  return summarizeImageWithResponsesApi({
+    visionConfig,
+    filePath,
+    contentType,
+    userText,
+  });
+}
+
+async function summarizeImageWithResponsesApi({ visionConfig, filePath, contentType, userText }) {
   if (!visionConfig.apiKey) {
     throw new Error("Vision API key is missing. Set CODEX_IM_VISION_API_KEY or OPENAI_API_KEY.");
   }
@@ -59,6 +80,47 @@ async function summarizeImage({ config, filePath, contentType, userText = "" }) 
   }
 }
 
+async function summarizeImageWithCodexCli({ visionConfig, filePath, userText, workspaceRoot }) {
+  const command = visionConfig.codexCommand || "codex";
+  const model = visionConfig.model || "gpt-5.5";
+  const timeoutMs = Number(visionConfig.timeoutMs || 60000);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "yuan-feishu-vision-"));
+  const outputPath = path.join(tempDir, "summary.txt");
+  const cwd = normalizeWorkspaceRoot(workspaceRoot);
+  const args = [
+    "exec",
+    "-C",
+    cwd,
+    "--skip-git-repo-check",
+    "--ephemeral",
+    "--model",
+    model,
+    "--image",
+    filePath,
+    "-o",
+    outputPath,
+    "--color",
+    "never",
+    "--",
+    buildVisionPrompt(userText),
+  ];
+
+  try {
+    await runCommand(command, args, { timeoutMs });
+    const text = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8").trim() : "";
+    if (!text) {
+      throw new Error("Codex CLI vision response did not include text output");
+    }
+    return text;
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Best-effort temp cleanup.
+    }
+  }
+}
+
 function buildVisionPrompt(userText) {
   const suffix = String(userText || "").trim()
     ? `\n\nJiao accompanying text:\n${String(userText).trim()}`
@@ -90,6 +152,77 @@ function normalizeContentType(contentType) {
 
 function normalizeBaseUrl(baseUrl) {
   return String(baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
+}
+
+function normalizeVisionProvider(provider) {
+  const normalized = String(provider || "codex-cli").trim().toLowerCase();
+  return normalized === "responses" || normalized === "responses-api" ? "responses" : "codex-cli";
+}
+
+function normalizeWorkspaceRoot(workspaceRoot) {
+  const normalized = String(workspaceRoot || "").trim();
+  return normalized || process.cwd();
+}
+
+async function runCommand(command, args, { timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // Ignore kill failures; the timeout error is enough for the caller.
+      }
+      reject(new Error(`Codex CLI vision timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(buildCommandFailureMessage(command, code, stdout, stderr)));
+    });
+  });
+}
+
+function buildCommandFailureMessage(command, code, stdout, stderr) {
+  const detail = [stderr, stdout]
+    .map((text) => String(text || "").trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1200);
+  return `${command} exited with code ${code}${detail ? `: ${detail}` : ""}`;
 }
 
 function extractResponseText(payload) {

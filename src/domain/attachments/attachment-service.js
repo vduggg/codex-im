@@ -3,7 +3,7 @@ const path = require("path");
 const { formatFailureText } = require("../../shared/error-text");
 const visionService = require("./vision-service");
 
-async function prepareImageMessage(runtime, normalized) {
+async function prepareImageMessage(runtime, normalized, { workspaceRoot = "" } = {}) {
   const image = extractFirstImageAttachment(normalized);
   if (!image?.resourceKey) {
     await runtime.sendInfoCardMessage({
@@ -34,6 +34,7 @@ async function prepareImageMessage(runtime, normalized) {
       filePath,
       contentType,
       userText: normalized.text,
+      workspaceRoot,
     });
     return buildImageNormalizedMessage({
       normalized,
