@@ -29,11 +29,12 @@ async function onFeishuTextEvent(runtime, event) {
   }
   const { bindingKey, workspaceRoot } = workspaceContext;
   const codexParams = runtime.getCodexParamsForWorkspace(bindingKey, workspaceRoot);
+  const isImageMessage = normalized.command === "image_message";
   normalized = {
     ...normalized,
     codexModel: codexParams.model || runtime.config.defaultCodexModel || "",
   };
-  if (normalized.command === "image_message") {
+  if (isImageMessage) {
     normalized = await attachmentRuntime.prepareImageMessage(runtime, normalized, { workspaceRoot });
     if (!normalized) {
       return;
@@ -43,9 +44,9 @@ async function onFeishuTextEvent(runtime, event) {
     bindingKey,
     workspaceRoot,
     normalized,
-    autoSelectThread: normalized.command !== "image_message",
+    autoSelectThread: !isImageMessage,
   });
-  if (normalized.command === "image_message") {
+  if (isImageMessage) {
     threadId = "";
   }
 
