@@ -1,7 +1,6 @@
 const { filterThreadsByWorkspaceRoot } = require("../../shared/workspace-paths");
 const { extractSwitchThreadId } = require("../../shared/command-parsing");
 const codexMessageUtils = require("../../infra/codex/message-utils");
-const memoryBridgeRuntime = require("../../private/extensions/memory-bridge/memory-bridge-service");
 
 const THREAD_SOURCE_KINDS = new Set([
   "app",
@@ -52,8 +51,9 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
       workspaceRoot,
       normalized,
     });
-    await recordInboundSignalSafely({ normalized, workspaceRoot, threadId: createdThreadId });
+    await recordInboundSignalSafely({ runtime, normalized, workspaceRoot, threadId: createdThreadId });
     const textWithMemory = await buildMessageWithMemoryPreflightSafely({
+      runtime,
       text: normalized.text,
       workspaceRoot,
       threadId: createdThreadId,
@@ -74,8 +74,9 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
 
   try {
     await ensureThreadResumed(runtime, threadId);
-    await recordInboundSignalSafely({ normalized, workspaceRoot, threadId });
+    await recordInboundSignalSafely({ runtime, normalized, workspaceRoot, threadId });
     const textWithMemory = await buildMessageWithMemoryPreflightSafely({
+      runtime,
       text: normalized.text,
       workspaceRoot,
       threadId,
@@ -105,8 +106,9 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
       workspaceRoot,
       normalized,
     });
-    await recordInboundSignalSafely({ normalized, workspaceRoot, threadId: recreatedThreadId });
+    await recordInboundSignalSafely({ runtime, normalized, workspaceRoot, threadId: recreatedThreadId });
     const textWithMemory = await buildMessageWithMemoryPreflightSafely({
+      runtime,
       text: normalized.text,
       workspaceRoot,
       threadId: recreatedThreadId,
@@ -128,7 +130,7 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
 
 async function recordInboundSignalSafely(args) {
   try {
-    await memoryBridgeRuntime.recordInboundSignal(args);
+    await args.runtime?.extensions?.memoryBridge?.recordInboundSignal(args);
   } catch (error) {
     console.warn(`[codex-im] memory signal write skipped: ${error.message}`);
   }
@@ -136,7 +138,8 @@ async function recordInboundSignalSafely(args) {
 
 async function buildMessageWithMemoryPreflightSafely(args) {
   try {
-    return await memoryBridgeRuntime.buildMessageWithMemoryPreflight(args);
+    const buildMessage = args.runtime?.extensions?.memoryBridge?.buildMessageWithMemoryPreflight;
+    return typeof buildMessage === "function" ? await buildMessage(args) : args.text;
   } catch (error) {
     console.warn(`[codex-im] memory preflight skipped: ${error.message}`);
     return args.text;

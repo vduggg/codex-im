@@ -48,24 +48,19 @@ const approvalRuntime = require("../domain/approval/approval-service");
 const runtimeState = require("../domain/session/binding-context");
 const threadRuntime = require("../domain/thread/thread-service");
 const workspaceRuntime = require("../domain/workspace/workspace-service");
-const memoryBridgeRuntime = require("../private/extensions/memory-bridge/memory-bridge-service");
-const hubRuntime = require("../private/extensions/hub/hub-service");
+const runtimeExtensions = require("./runtime-extensions");
 const eventsRuntime = require("./codex-event-service");
 const approvalPolicyRuntime = require("../domain/approval/approval-policy");
 const appDispatcher = require("./dispatcher");
 const { extractModelCatalogFromListResponse } = require("../shared/model-catalog");
 const { extractProfileValue } = require("../shared/command-parsing");
 const fs = require("fs");
-const { spawn } = require("child_process");
-const http = require("http");
-const path = require("path");
 
 const CODEX_APP_SERVER_PROFILES = Object.freeze({
   main: "",
   default: "",
   openai: "",
-  deepseek: "deepseek-pro",
-  "deepseek-pro": "deepseek-pro",
+  ...runtimeExtensions.codexProfiles.profiles,
 });
 
 class FeishuBotRuntime {
@@ -108,6 +103,7 @@ class FeishuBotRuntime {
     this.resumedThreadIds = new Set();
     this.staleTurnWatchdog = null;
     this.memoryBridgeScheduler = null;
+    this.extensions = runtimeExtensions;
     this.codex.onMessage((message) => appDispatcher.onCodexMessage(this, message));
   }
 
@@ -119,7 +115,9 @@ class FeishuBotRuntime {
     await this.refreshAvailableModelCatalogAtStartup();
     this.startLongConnection();
     this.startStaleTurnWatchdog();
-    this.memoryBridgeScheduler = memoryBridgeRuntime.startDailyBridgeScheduler();
+    if (typeof this.extensions?.memoryBridge?.startDailyBridgeScheduler === "function") {
+      this.memoryBridgeScheduler = this.extensions.memoryBridge.startDailyBridgeScheduler();
+    }
     console.log(`[codex-im] feishu-bot runtime ready for app ${maskSecret(this.config.feishu.appId)}`);
   }
 
@@ -327,13 +325,13 @@ class FeishuBotRuntime {
     if (!rawAlias) {
       return {
         ok: false,
-        message: `当前 Codex 运行档：${this.describeCodexAppServerProfile()}\n\n用法：\`/codex profile main\` 或 \`/codex profile deepseek\``,
+        message: `当前 Codex 运行档：${this.describeCodexAppServerProfile()}\n\n用法：${this.buildProfileUsageText()}`,
       };
     }
     if (!(rawAlias in CODEX_APP_SERVER_PROFILES)) {
       return {
         ok: false,
-        message: "未知运行档。可用：`main`、`deepseek`。",
+        message: `未知运行档。可用：${this.buildProfileAliasListText()}。`,
       };
     }
     if (this.activeTurnIdByThreadId.size > 0) {
@@ -352,8 +350,8 @@ class FeishuBotRuntime {
       };
     }
 
-    if (nextProfile === "deepseek-pro") {
-      await ensureDeepSeekAdapter(process.env);
+    if (typeof this.extensions?.codexProfiles?.beforeSwitchCodexAppServerProfile === "function") {
+      await this.extensions.codexProfiles.beforeSwitchCodexAppServerProfile(nextProfile, process.env);
     }
 
     await this.codex.restartSpawn({ appServerProfile: nextProfile });
@@ -381,9 +379,9 @@ class FeishuBotRuntime {
           "",
           "用法：",
           "`/codex profile main`",
-          "`/codex profile deepseek`",
+          ...this.getExtensionProfileHelpLines(),
           "",
-          "说明：该命令会重启飞书桥背后的 Codex app-server；不会修改 OpenClaw。",
+          `说明：该命令会重启飞书桥背后的 Codex app-server${this.getExtensionProfileNote()}。`,
         ].join("\n"),
       });
       return;
@@ -413,6 +411,29 @@ class FeishuBotRuntime {
         text: `切换 Codex 运行档失败：${error.message}`,
       });
     }
+  }
+
+  getExtensionProfileHelpLines() {
+    const getLines = this.extensions?.codexProfiles?.getProfileHelpLines;
+    return typeof getLines === "function" ? getLines() : [];
+  }
+
+  getExtensionProfileNote() {
+    const getNote = this.extensions?.codexProfiles?.getProfileNote;
+    return typeof getNote === "function" ? getNote() : "";
+  }
+
+  buildProfileUsageText() {
+    return ["`/codex profile main`", ...this.getExtensionProfileHelpLines()].join(" 或 ");
+  }
+
+  buildProfileAliasListText() {
+    const labels = ["`main`"];
+    const displayNames = this.extensions?.codexProfiles?.displayNames || {};
+    for (const name of Object.values(displayNames)) {
+      labels.push(`\`${name}\``);
+    }
+    return labels.join("、");
   }
 
   async resolveWorkspaceStats(workspaceRoot) {
@@ -494,15 +515,15 @@ function attachRuntimeForwarders() {
     handleSendCommand: workspaceRuntime.handleSendCommand,
     handleModelCommand: workspaceRuntime.handleModelCommand,
     handleEffortCommand: workspaceRuntime.handleEffortCommand,
-    handleBridgeCommand: memoryBridgeRuntime.handleBridgeCommand,
-    handleMemoryCommand: memoryBridgeRuntime.handleMemoryCommand,
-    handleMemoryHelpCommand: memoryBridgeRuntime.handleMemoryHelpCommand,
-    handleTodayCommand: memoryBridgeRuntime.handleTodayCommand,
-    handleTodoCommand: memoryBridgeRuntime.handleTodoCommand,
-    handleTodoFormCommand: memoryBridgeRuntime.handleTodoFormCommand,
-    handleTodoSubmitCardAction: memoryBridgeRuntime.handleTodoSubmitCardAction,
-    handleRecallCommand: memoryBridgeRuntime.handleRecallCommand,
-    handleHubCommand: hubRuntime.handleHubCommand,
+    handleBridgeCommand: runtimeExtensions.memoryBridge.handleBridgeCommand,
+    handleMemoryCommand: runtimeExtensions.memoryBridge.handleMemoryCommand,
+    handleMemoryHelpCommand: runtimeExtensions.memoryBridge.handleMemoryHelpCommand,
+    handleTodayCommand: runtimeExtensions.memoryBridge.handleTodayCommand,
+    handleTodoCommand: runtimeExtensions.memoryBridge.handleTodoCommand,
+    handleTodoFormCommand: runtimeExtensions.memoryBridge.handleTodoFormCommand,
+    handleTodoSubmitCardAction: runtimeExtensions.memoryBridge.handleTodoSubmitCardAction,
+    handleRecallCommand: runtimeExtensions.memoryBridge.handleRecallCommand,
+    handleHubCommand: runtimeExtensions.hub.handleHubCommand,
     refreshWorkspaceThreads: threadRuntime.refreshWorkspaceThreads,
     describeWorkspaceStatus: threadRuntime.describeWorkspaceStatus,
     switchThreadById: threadRuntime.switchThreadById,
@@ -566,75 +587,3 @@ function maskSecret(value) {
 }
 
 module.exports = { FeishuBotRuntime };
-
-function ensureDeepSeekAdapter(env = process.env) {
-  return new Promise((resolve, reject) => {
-    checkDeepSeekAdapter((isAlive) => {
-      if (isAlive) {
-        resolve();
-        return;
-      }
-      const adapterScript = path.join(env.HOME || "", ".codex", "bin", "start-deepseek-litellm.sh");
-      const adapterEnv = { ...env };
-      if (!adapterEnv.DEEPSEEK_API_KEY) {
-        adapterEnv.DEEPSEEK_API_KEY = readDeepSeekApiKeyFromOpenClaw(env.HOME || "");
-      }
-      if (!adapterEnv.DEEPSEEK_API_KEY) {
-        reject(new Error("DeepSeek API key is missing. Set DEEPSEEK_API_KEY before switching to deepseek."));
-        return;
-      }
-      const outPath = path.join(env.HOME || "", ".codex", "deepseek-adapter.log");
-      const out = fs.openSync(outPath, "a");
-      const child = spawn(adapterScript, [], {
-        env: adapterEnv,
-        detached: true,
-        stdio: ["ignore", out, out],
-      });
-      child.unref();
-      let attempts = 0;
-      const timer = setInterval(() => {
-        attempts += 1;
-        checkDeepSeekAdapter((ready) => {
-          if (ready) {
-            clearInterval(timer);
-            resolve();
-            return;
-          }
-          if (attempts >= 30) {
-            clearInterval(timer);
-            reject(new Error(`DeepSeek adapter failed to start. See ${outPath}`));
-          }
-        });
-      }, 250);
-    });
-  });
-}
-
-function checkDeepSeekAdapter(callback) {
-  const req = http.request({
-    host: "127.0.0.1",
-    port: 4011,
-    path: "/v1/models",
-    method: "GET",
-    timeout: 1000,
-  }, (res) => {
-    res.resume();
-    callback(res.statusCode >= 200 && res.statusCode < 300);
-  });
-  req.on("error", () => callback(false));
-  req.on("timeout", () => {
-    req.destroy();
-    callback(false);
-  });
-  req.end();
-}
-
-function readDeepSeekApiKeyFromOpenClaw(home) {
-  try {
-    const configPath = path.join(home, ".openclaw", "openclaw.json");
-    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    return String(parsed?.models?.providers?.deepseek?.apiKey || "").trim();
-  } catch {
-    return "";
-  }
-}
