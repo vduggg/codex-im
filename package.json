@@ -15,6 +15,7 @@
   ],
   "files": [
     "bin",
+    "scripts",
     "src",
     "README.md",
     ".env.example"
@@ -31,7 +32,9 @@
   },
   "scripts": {
     "feishu-bot": "node ./bin/codex-im.js",
-    "check": "find src bin scripts -name '*.js' -print0 | xargs -0 -n1 node --check"
+    "check": "find src bin scripts -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "test:media": "node ./scripts/test-media-fixtures.js",
+    "smoke:feishu-media": "node ./scripts/feishu-media-smoke.js"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.54.0",

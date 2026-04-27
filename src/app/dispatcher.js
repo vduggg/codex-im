@@ -16,7 +16,8 @@ async function onFeishuTextEvent(runtime, event) {
     });
     return;
   }
-  if (normalized.command !== "image_message" && await runtime.dispatchTextCommand(normalized)) {
+  const isAttachmentCommand = normalized.command === "image_message" || normalized.command === "attachment_message";
+  if (!isAttachmentCommand && await runtime.dispatchTextCommand(normalized)) {
     return;
   }
 
@@ -30,12 +31,16 @@ async function onFeishuTextEvent(runtime, event) {
   const { bindingKey, workspaceRoot } = workspaceContext;
   const codexParams = runtime.getCodexParamsForWorkspace(bindingKey, workspaceRoot);
   const isImageMessage = normalized.command === "image_message";
+  const isAttachmentMessage = isImageMessage || normalized.command === "attachment_message";
   normalized = {
     ...normalized,
     codexModel: codexParams.model || runtime.config.defaultCodexModel || "",
   };
-  if (isImageMessage) {
-    normalized = await attachmentRuntime.prepareImageMessage(runtime, normalized, { workspaceRoot });
+  if (isAttachmentMessage) {
+    normalized = await attachmentRuntime.prepareAttachmentMessage(runtime, normalized, {
+      workspaceRoot,
+      expectedKind: isImageMessage ? "image" : "",
+    });
     if (!normalized) {
       return;
     }

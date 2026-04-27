@@ -1,15 +1,26 @@
 const fs = require("fs");
 const path = require("path");
 const { formatFailureText } = require("../../shared/error-text");
+const { isSafeTextFile } = require("../../shared/media-types");
+
+const MAX_TEXT_PREVIEW_BYTES = 256 * 1024;
+const MAX_TEXT_PREVIEW_CHARS = 12000;
 
 async function prepareImageMessage(runtime, normalized, { workspaceRoot = "" } = {}) {
-  const image = extractFirstImageAttachment(normalized);
-  if (!image?.resourceKey) {
+  return prepareAttachmentMessage(runtime, normalized, {
+    workspaceRoot,
+    expectedKind: "image",
+  });
+}
+
+async function prepareAttachmentMessage(runtime, normalized, { workspaceRoot = "", expectedKind = "" } = {}) {
+  const pendingAttachments = extractPendingAttachments(normalized, expectedKind);
+  if (!pendingAttachments.length) {
     await runtime.sendInfoCardMessage({
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
       text: [
-        "我收到图片了，但没有从飞书事件里解析到图片资源键。",
+        "我收到附件了，但没有从飞书事件里解析到资源键。",
         "",
         "这一步先停住，不会猜测下载地址。需要再看一条真实事件结构。",
       ].join("\n"),
@@ -18,21 +29,29 @@ async function prepareImageMessage(runtime, normalized, { workspaceRoot = "" } =
   }
 
   try {
-    const filePath = buildImageCachePath(runtime.config, normalized, image);
-    const result = await runtime.requireFeishuAdapter().downloadMessageResource({
-      messageId: normalized.messageId,
-      fileKey: image.resourceKey,
-      type: "image",
-      filePath,
-    });
-    const stats = fs.statSync(filePath);
-    assertCachedImageSize(runtime.config, filePath, stats.size);
-    const contentType = normalizeHeader(result.headers, "content-type") || "image/png";
-    return buildImageNormalizedMessage({
+    const downloaded = [];
+    for (const attachment of pendingAttachments) {
+      const filePath = buildAttachmentCachePath(runtime.config, normalized, attachment);
+      const result = await runtime.requireFeishuAdapter().downloadMessageResource({
+        messageId: normalized.messageId,
+        fileKey: attachment.resourceKey,
+        type: attachment.resourceType || attachment.kind,
+        filePath,
+      });
+      const stats = fs.statSync(filePath);
+      assertCachedAttachmentSize(runtime.config, attachment, filePath, stats.size);
+      const contentType = normalizeHeader(result.headers, "content-type") || inferDefaultContentType(attachment);
+      downloaded.push(await buildDownloadedAttachment({
+        attachment,
+        filePath: result.filePath || filePath,
+        size: stats.size,
+        contentType,
+        workspaceRoot,
+      }));
+    }
+    return buildAttachmentNormalizedMessage({
       normalized,
-      filePath: result.filePath || filePath,
-      size: stats.size,
-      contentType,
+      downloaded,
       workspaceRoot,
     });
   } catch (error) {
@@ -40,28 +59,35 @@ async function prepareImageMessage(runtime, normalized, { workspaceRoot = "" } =
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
       text: [
-        "我收到图片了，但图片理解这一步还没走通。",
+        "我收到附件了，但附件处理这一步还没走通。",
         "",
-        formatFailureText("图片处理失败", error),
+        formatFailureText("附件处理失败", error),
         "",
-        "文字链路不受影响；原图只保存在本地私有缓存，不会写入 Obsidian。",
+        "文字链路不受影响；原始附件只保存在本地私有缓存，不会写入 Obsidian。",
       ].join("\n"),
     });
     return null;
   }
 }
 
-function extractFirstImageAttachment(normalized) {
+function extractPendingAttachments(normalized, expectedKind = "") {
   const attachments = Array.isArray(normalized.attachments) ? normalized.attachments : [];
-  return attachments.find((attachment) => attachment?.kind === "image") || null;
+  return attachments.filter((attachment) => {
+    if (!attachment?.resourceKey || attachment.filePath) {
+      return false;
+    }
+    return expectedKind ? attachment.kind === expectedKind : true;
+  });
 }
 
-function buildImageCachePath(config, normalized, image) {
+function buildAttachmentCachePath(config, normalized, attachment) {
   const rootDir = config.attachmentsDir || path.join(process.env.HOME || "", ".codex", "yuan-feishu", "attachments");
   const day = normalizeDay(normalized.receivedAt);
   const messageId = sanitizePathPart(normalized.messageId || "message");
-  const resourceKey = sanitizePathPart(image.resourceKey || "image");
-  return path.join(rootDir, day, `${messageId}-${resourceKey}.bin`);
+  const resourceKey = sanitizePathPart(attachment.resourceKey || attachment.kind || "attachment");
+  const fileName = sanitizePathPart(attachment.fileName || "");
+  const suffix = fileName ? `-${fileName}` : ".bin";
+  return path.join(rootDir, day, `${messageId}-${resourceKey}${suffix}`);
 }
 
 function normalizeDay(value) {
@@ -77,15 +103,17 @@ function sanitizePathPart(value) {
   return normalized.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 96) || "item";
 }
 
-function assertCachedImageSize(config, filePath, size) {
-  const maxBytes = Number(config.maxImageBytes || 0);
+function assertCachedAttachmentSize(config, attachment, filePath, size) {
+  const maxBytes = attachment.kind === "image"
+    ? Number(config.maxImageBytes || 0)
+    : Number(config.maxAttachmentBytes || 0);
   if (maxBytes > 0 && size > maxBytes) {
     try {
       fs.unlinkSync(filePath);
     } catch {
       // Best-effort cleanup; the caller still gets the size-limit error.
     }
-    throw new Error(`image is too large: ${size} bytes > ${maxBytes} bytes`);
+    throw new Error(`${attachment.kind || "attachment"} is too large: ${size} bytes > ${maxBytes} bytes`);
   }
 }
 
@@ -100,45 +128,113 @@ function normalizeHeader(headers, name) {
   return Array.isArray(direct) ? direct.join(", ") : "";
 }
 
-function buildImageNormalizedMessage({ normalized, filePath, size, contentType, workspaceRoot }) {
-  const userText = normalizeUserImageText(normalized.text);
-  const text = [
-    userText,
-    "",
-    "[System note: Jiao sent an image through Feishu. The bridge downloaded the original image to local private cache and attached it to this Codex turn as a native image input. Look at the attached image directly; do not treat this note as a replacement for visual inspection.]",
-  ].join("\n");
+async function buildDownloadedAttachment({ attachment, filePath, size, contentType, workspaceRoot }) {
+  const downloaded = {
+    ...attachment,
+    filePath,
+    size,
+    contentType,
+    workspaceRoot,
+  };
+  if (attachment.kind === "file" && isSafeTextFile(filePath, contentType) && size <= MAX_TEXT_PREVIEW_BYTES) {
+    downloaded.textPreview = await readTextPreview(filePath);
+  }
+  if (attachment.kind === "audio") {
+    downloaded.transcript = "";
+    downloaded.transcriptionStatus = "not_configured";
+  }
+  return downloaded;
+}
+
+async function readTextPreview(filePath) {
+  const text = await fs.promises.readFile(filePath, "utf8");
+  return text.length > MAX_TEXT_PREVIEW_CHARS
+    ? `${text.slice(0, MAX_TEXT_PREVIEW_CHARS)}\n[...truncated...]`
+    : text;
+}
+
+function buildAttachmentNormalizedMessage({ normalized, downloaded }) {
+  const imageAttachments = downloaded.filter((attachment) => attachment.kind === "image");
+  const nonImageAttachments = downloaded.filter((attachment) => attachment.kind !== "image");
+  const userText = normalizeUserAttachmentText(normalized.text, downloaded);
+  const notes = buildAttachmentSystemNotes(downloaded);
+  const text = [userText, "", ...notes].filter(Boolean).join("\n");
 
   return {
     ...normalized,
     text,
     command: "message",
     attachments: [
-      ...preserveNonDownloadedAttachments(normalized.attachments),
-      {
-        kind: "image",
-        filePath,
-        size,
-        contentType,
-        workspaceRoot,
-        resourceKey: extractFirstImageAttachment(normalized)?.resourceKey || "",
-      },
+      ...preserveNonDownloadedAttachments(normalized.attachments, downloaded),
+      ...downloaded,
     ],
-    imageContext: { filePath, size, contentType, mode: "native" },
+    imageContext: imageAttachments[0]
+      ? {
+        filePath: imageAttachments[0].filePath,
+        size: imageAttachments[0].size,
+        contentType: imageAttachments[0].contentType,
+        mode: "native",
+      }
+      : undefined,
+    attachmentContext: nonImageAttachments.length ? nonImageAttachments : undefined,
   };
 }
 
-function normalizeUserImageText(text) {
-  const normalized = String(text || "").trim();
-  return normalized || "请看这张图片。";
+function buildAttachmentSystemNotes(downloaded) {
+  return downloaded.map((attachment) => {
+    if (attachment.kind === "image") {
+      return "[System note: Jiao sent an image through Feishu. The bridge downloaded the original image to local private cache and attached it to this Codex turn as a native image input. Look at the attached image directly; do not treat this note as a replacement for visual inspection.]";
+    }
+    const lines = [
+      `[System note: Jiao sent a ${attachment.kind} through Feishu. The bridge downloaded it to local private cache and is passing metadata as text because the Codex app-server input shape is only confirmed for text and localImage.]`,
+      `Local path: ${attachment.filePath}`,
+      `File name: ${attachment.fileName || path.basename(attachment.filePath)}`,
+      `Size: ${attachment.size} bytes`,
+      `Content type: ${attachment.contentType || "unknown"}`,
+    ];
+    if (attachment.kind === "audio") {
+      lines.push("Transcription: not configured in this bridge version.");
+    }
+    if (attachment.textPreview) {
+      lines.push("", "Text preview:", attachment.textPreview);
+    }
+    return lines.join("\n");
+  });
 }
 
-function preserveNonDownloadedAttachments(attachments) {
+function normalizeUserAttachmentText(text, downloaded) {
+  const normalized = String(text || "").trim();
+  if (normalized) {
+    return normalized;
+  }
+  if (downloaded.some((attachment) => attachment.kind === "image")) {
+    return "请看这张图片。";
+  }
+  if (downloaded.some((attachment) => attachment.kind === "audio")) {
+    return "请处理这段语音/音频。";
+  }
+  return "请处理这个文件。";
+}
+
+function preserveNonDownloadedAttachments(attachments, downloaded) {
   if (!Array.isArray(attachments)) {
     return [];
   }
-  return attachments.filter((attachment) => attachment?.kind !== "image" || attachment.filePath);
+  const downloadedKeys = new Set(downloaded.map((attachment) => attachment.resourceKey).filter(Boolean));
+  return attachments.filter((attachment) => attachment.filePath || !downloadedKeys.has(attachment.resourceKey));
+}
+
+function inferDefaultContentType(attachment) {
+  if (attachment.kind === "image") {
+    return "image/png";
+  }
+  if (attachment.kind === "audio") {
+    return "audio/opus";
+  }
+  return "application/octet-stream";
 }
 
 module.exports = {
+  prepareAttachmentMessage,
   prepareImageMessage,
 };

@@ -576,6 +576,45 @@ FeishuBotRuntime.prototype.sendFileMessage = function sendFileMessage(args) {
   return this.requireFeishuAdapter().sendFileMessage(args);
 };
 
+FeishuBotRuntime.prototype.sendImageMessage = function sendImageMessage(args) {
+  return this.requireFeishuAdapter().sendImageMessage(args);
+};
+
+FeishuBotRuntime.prototype.sendLocalAttachmentToFeishu = function sendLocalAttachmentToFeishu(args) {
+  return this.requireFeishuAdapter().sendLocalAttachmentToFeishu
+    ? this.requireFeishuAdapter().sendLocalAttachmentToFeishu(args)
+    : sendLocalAttachmentWithRuntime(this, args);
+};
+
+async function sendLocalAttachmentWithRuntime(runtime, {
+  kind,
+  chatId,
+  fileName,
+  fileBuffer,
+  fileType = "stream",
+  msgType = "file",
+  replyToMessageId = "",
+  replyInThread = false,
+}) {
+  if (kind === "image") {
+    return runtime.sendImageMessage({
+      chatId,
+      imageBuffer: fileBuffer,
+      replyToMessageId,
+      replyInThread,
+    });
+  }
+  return runtime.sendFileMessage({
+    chatId,
+    fileName,
+    fileBuffer,
+    fileType,
+    msgType,
+    replyToMessageId,
+    replyInThread,
+  });
+}
+
 function maskSecret(value) {
   if (!value) {
     return "";

@@ -21,8 +21,13 @@ const {
 } = require("../../shared/model-catalog");
 const codexMessageUtils = require("../../infra/codex/message-utils");
 const { formatFailureText } = require("../../shared/error-text");
+const {
+  classifyLocalAttachment,
+  inferFeishuFileType,
+} = require("../../shared/media-types");
 
 const MAX_FEISHU_UPLOAD_FILE_BYTES = 30 * 1024 * 1024;
+const MAX_FEISHU_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
 
 async function resolveWorkspaceContext(
   runtime,
@@ -271,32 +276,41 @@ async function handleSendCommand(runtime, normalized) {
     return;
   }
 
-  if (fileStats.size > MAX_FEISHU_UPLOAD_FILE_BYTES) {
+  const attachmentKind = classifyLocalAttachment(resolvedTarget.filePath);
+  const maxUploadBytes = attachmentKind === "image"
+    ? MAX_FEISHU_UPLOAD_IMAGE_BYTES
+    : MAX_FEISHU_UPLOAD_FILE_BYTES;
+  const uploadLimitLabel = attachmentKind === "image" ? "10MB" : "30MB";
+  if (fileStats.size > maxUploadBytes) {
     await runtime.sendInfoCardMessage({
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
-      text: `文件过大，飞书当前只支持发送 30MB 以内文件: ${resolvedTarget.displayPath}`,
+      text: `文件过大，飞书当前只支持发送 ${uploadLimitLabel} 以内${attachmentKind === "image" ? "图片" : "文件"}: ${resolvedTarget.displayPath}`,
     });
     return;
   }
 
   try {
     const fileBuffer = await fs.promises.readFile(resolvedTarget.filePath);
-    await runtime.sendFileMessage({
+    const fileType = inferFeishuFileType(resolvedTarget.filePath);
+    await runtime.sendLocalAttachmentToFeishu({
+      kind: attachmentKind,
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
       fileName: path.basename(resolvedTarget.filePath),
       fileBuffer,
+      fileType,
+      msgType: attachmentKind === "audio" ? "audio" : "file",
     });
-    console.log(`[codex-im] file/send ok workspace=${workspaceRoot} path=${resolvedTarget.displayPath}`);
+    console.log(`[codex-im] attachment/send ok kind=${attachmentKind} workspace=${workspaceRoot} path=${resolvedTarget.displayPath}`);
   } catch (error) {
     console.warn(
-      `[codex-im] file/send failed workspace=${workspaceRoot} path=${resolvedTarget.displayPath}: ${error.message}`
+      `[codex-im] attachment/send failed workspace=${workspaceRoot} path=${resolvedTarget.displayPath}: ${error.message}`
     );
     await runtime.sendInfoCardMessage({
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
-      text: formatFailureText("发送文件失败", error),
+      text: formatFailureText("发送附件失败", error),
     });
   }
 }

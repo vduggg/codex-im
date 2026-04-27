@@ -30,6 +30,7 @@ function readConfig() {
     attachmentsDir: process.env.CODEX_IM_ATTACHMENTS_DIR
       || path.join(os.homedir(), ".codex", "yuan-feishu", "attachments"),
     maxImageBytes: readPositiveIntEnv("CODEX_IM_MAX_IMAGE_BYTES", 10 * 1024 * 1024),
+    maxAttachmentBytes: readPositiveIntEnv("CODEX_IM_MAX_ATTACHMENT_BYTES", 100 * 1024 * 1024),
     vision: {
       enabled: readBooleanEnv("CODEX_IM_VISION_ENABLED", true),
       provider: readTextEnv("CODEX_IM_VISION_PROVIDER") || "codex-cli",

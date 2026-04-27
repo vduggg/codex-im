@@ -195,6 +195,13 @@ codex-gateway logs
 | 发送删除表情回复 | `im:message.reactions:write_only` |
 | 获取与上传图片或文件资源 | `im:resource` |
 
+## 媒体附件
+
+- 收图：飞书图片会下载到本地私有缓存，并作为 Codex `localImage` 输入进入当前轮。
+- 收文件/语音：飞书文件和音频会下载到本地私有缓存；文本类文件会附带安全预览，二进制文件和音频先传元信息与本地路径。
+- 回传：`/codex send <当前项目下的相对文件路径>` 会自动按类型发送，图片走飞书图片消息，`.opus/.mp4` 走音频消息，其他文件走普通文件消息。
+- 自测：`npm run test:media` 做本地 fixture 验证；`npm run smoke:feishu-media` 用 Bot 身份向已绑定会话发送 `[自动测试]` 图片、文件和可用时的音频样本。
+
 
 
 # 参考项目

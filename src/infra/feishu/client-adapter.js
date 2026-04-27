@@ -7,16 +7,52 @@ class FeishuClientAdapter {
     this.client = client;
   }
 
-  async sendFileMessage({ chatId, fileName, fileBuffer, replyToMessageId = "", replyInThread = false }) {
+  async sendFileMessage({
+    chatId,
+    fileName,
+    fileBuffer,
+    fileType = "stream",
+    msgType = "file",
+    duration = null,
+    replyToMessageId = "",
+    replyInThread = false,
+  }) {
     const fileKey = await this.uploadFile({
       fileName,
       fileBuffer,
+      fileType,
+      duration,
     });
     if (!fileKey) {
       throw new Error("Feishu file upload did not return a file_key");
     }
 
     const content = JSON.stringify({ file_key: fileKey });
+    return this.sendResourceMessage({
+      chatId,
+      replyToMessageId,
+      replyInThread,
+      msgType,
+      content,
+    });
+  }
+
+  async sendImageMessage({ chatId, imageBuffer, replyToMessageId = "", replyInThread = false }) {
+    const imageKey = await this.uploadImage({ imageBuffer });
+    if (!imageKey) {
+      throw new Error("Feishu image upload did not return an image_key");
+    }
+
+    return this.sendResourceMessage({
+      chatId,
+      replyToMessageId,
+      replyInThread,
+      msgType: "image",
+      content: JSON.stringify({ image_key: imageKey }),
+    });
+  }
+
+  async sendResourceMessage({ chatId, replyToMessageId = "", replyInThread = false, msgType, content }) {
     if (replyToMessageId) {
       const replyMessage = resolveReplyMessageMethod(this.client);
       return replyMessage.call(this.client.im?.v1?.message || this.client.im?.message || this.client, {
@@ -24,7 +60,7 @@ class FeishuClientAdapter {
           message_id: normalizeMessageId(replyToMessageId),
         },
         data: {
-          msg_type: "file",
+          msg_type: msgType,
           content,
           reply_in_thread: replyInThread,
         },
@@ -38,7 +74,7 @@ class FeishuClientAdapter {
       },
       data: {
         receive_id: chatId,
-        msg_type: "file",
+        msg_type: msgType,
         content,
       },
     });
@@ -214,16 +250,32 @@ class FeishuClientAdapter {
     );
   }
 
-  async uploadFile({ fileName, fileBuffer }) {
+  async uploadFile({ fileName, fileBuffer, fileType = "stream", duration = null }) {
     const createFile = resolveCreateFileMethod(this.client);
+    const data = {
+      file_type: normalizeFeishuFileType(fileType),
+      file_name: normalizeFileName(fileName),
+      file: fileBuffer,
+    };
+    const normalizedDuration = Number(duration || 0);
+    if (Number.isFinite(normalizedDuration) && normalizedDuration > 0) {
+      data.duration = normalizedDuration;
+    }
     const response = await createFile.call(this.client.im?.v1?.file || this.client.im?.file || this.client, {
-      data: {
-        file_type: "stream",
-        file_name: normalizeFileName(fileName),
-        file: fileBuffer,
-      },
+      data,
     });
     return normalizeIdentifier(response?.file_key || response?.data?.file_key);
+  }
+
+  async uploadImage({ imageBuffer }) {
+    const createImage = resolveCreateImageMethod(this.client);
+    const response = await createImage.call(this.client.im?.v1?.image || this.client.im?.image || this.client, {
+      data: {
+        image_type: "message",
+        image: imageBuffer,
+      },
+    });
+    return normalizeIdentifier(response?.image_key || response?.data?.image_key);
   }
 
   async downloadMessageResource({ messageId, fileKey, type, filePath = "" }) {
@@ -325,6 +377,14 @@ function resolveCreateFileMethod(client) {
   return fn;
 }
 
+function resolveCreateImageMethod(client) {
+  const fn = client?.im?.v1?.image?.create || client?.im?.image?.create;
+  if (typeof fn !== "function") {
+    throw new Error("Unsupported Feishu SDK shape: missing image.create");
+  }
+  return fn;
+}
+
 function resolveGetMessageResourceMethod(client) {
   const fn = client?.im?.v1?.messageResource?.get || client?.im?.messageResource?.get;
   if (typeof fn !== "function") {
@@ -397,6 +457,11 @@ function assertFeishuBusinessOk(response, apiName) {
 
 function normalizeFileName(fileName) {
   return typeof fileName === "string" && fileName.trim() ? fileName.trim() : "file";
+}
+
+function normalizeFeishuFileType(fileType) {
+  const normalized = normalizeIdentifier(fileType);
+  return normalized || "stream";
 }
 
 module.exports = {

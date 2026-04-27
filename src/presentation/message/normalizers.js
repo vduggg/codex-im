@@ -34,6 +34,8 @@ function normalizeFeishuNonTextEvent(message, sender, config) {
   const text = parseFeishuNonTextMessageText(messageType, message.content);
   const command = attachments.some((attachment) => attachment?.kind === "image")
     ? "image_message"
+    : attachments.length
+      ? "attachment_message"
     : "unsupported_message";
   return {
     provider: "feishu",
@@ -177,6 +179,7 @@ function extractFeishuMessageAttachments(messageType, rawContent) {
       ? [{
         kind: "image",
         resourceKey: imageKey,
+        resourceType: "image",
       }]
       : [];
   }
@@ -184,7 +187,49 @@ function extractFeishuMessageAttachments(messageType, rawContent) {
     return extractPostImageKeys(parsed).map((resourceKey) => ({
       kind: "image",
       resourceKey,
+      resourceType: "image",
     }));
+  }
+  if (messageType === "file") {
+    const resourceKey = normalizeIdentifier(parsed.file_key || parsed.fileKey);
+    return resourceKey
+      ? [{
+        kind: "file",
+        resourceKey,
+        resourceType: "file",
+        fileName: normalizeIdentifier(parsed.file_name || parsed.fileName || parsed.name),
+        fileSize: normalizeNumber(parsed.file_size || parsed.fileSize || parsed.size),
+        fileType: normalizeIdentifier(parsed.file_type || parsed.fileType),
+      }]
+      : [];
+  }
+  if (messageType === "audio" || messageType === "voice") {
+    const resourceKey = normalizeIdentifier(parsed.file_key || parsed.fileKey);
+    return resourceKey
+      ? [{
+        kind: "audio",
+        resourceKey,
+        resourceType: "file",
+        fileName: normalizeIdentifier(parsed.file_name || parsed.fileName || parsed.name) || "audio.opus",
+        fileSize: normalizeNumber(parsed.file_size || parsed.fileSize || parsed.size),
+        fileType: normalizeIdentifier(parsed.file_type || parsed.fileType),
+        duration: normalizeNumber(parsed.duration),
+      }]
+      : [];
+  }
+  if (messageType === "media") {
+    const resourceKey = normalizeIdentifier(parsed.file_key || parsed.fileKey || parsed.media_key || parsed.mediaKey);
+    return resourceKey
+      ? [{
+        kind: "audio",
+        resourceKey,
+        resourceType: "media",
+        fileName: normalizeIdentifier(parsed.file_name || parsed.fileName || parsed.name) || "media.mp4",
+        fileSize: normalizeNumber(parsed.file_size || parsed.fileSize || parsed.size),
+        fileType: normalizeIdentifier(parsed.file_type || parsed.fileType) || "mp4",
+        duration: normalizeNumber(parsed.duration),
+      }]
+      : [];
   }
   return [];
 }
@@ -389,6 +434,11 @@ function extractCardFormValue(action, value) {
 
 function normalizeIdentifier(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function normalizeNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 module.exports = {
