@@ -31,6 +31,10 @@ function normalizeFeishuNonTextEvent(message, sender, config) {
     return null;
   }
   const attachments = extractFeishuMessageAttachments(messageType, message.content);
+  const text = parseFeishuNonTextMessageText(messageType, message.content);
+  const command = attachments.some((attachment) => attachment?.kind === "image")
+    ? "image_message"
+    : "unsupported_message";
   return {
     provider: "feishu",
     workspaceId: config.defaultWorkspaceId,
@@ -38,8 +42,8 @@ function normalizeFeishuNonTextEvent(message, sender, config) {
     threadKey: message.root_id || "",
     senderId: sender?.sender_id?.open_id || sender?.sender_id?.user_id || "",
     messageId: message.message_id || "",
-    text: "",
-    command: messageType === "image" ? "image_message" : "unsupported_message",
+    text,
+    command,
     attachments,
     unsupportedMessageType: messageType,
     receivedAt: new Date().toISOString(),
@@ -176,7 +180,90 @@ function extractFeishuMessageAttachments(messageType, rawContent) {
       }]
       : [];
   }
+  if (messageType === "post") {
+    return extractPostImageKeys(parsed).map((resourceKey) => ({
+      kind: "image",
+      resourceKey,
+    }));
+  }
   return [];
+}
+
+function parseFeishuNonTextMessageText(messageType, rawContent) {
+  if (messageType !== "post") {
+    return "";
+  }
+  const parsed = parseFeishuMessageContent(rawContent);
+  return extractPostText(parsed).trim();
+}
+
+function extractPostImageKeys(value, result = []) {
+  if (!value) {
+    return result;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      extractPostImageKeys(item, result);
+    }
+    return dedupeStrings(result);
+  }
+  if (typeof value !== "object") {
+    return result;
+  }
+
+  const tag = normalizeIdentifier(value.tag).toLowerCase();
+  const imageKey = normalizeIdentifier(
+    value.image_key
+      || value.imageKey
+      || value.file_key
+      || value.fileKey
+      || (tag === "img" ? value.key : "")
+  );
+  if (imageKey) {
+    result.push(imageKey);
+  }
+
+  for (const child of Object.values(value)) {
+    if (child && typeof child === "object") {
+      extractPostImageKeys(child, result);
+    }
+  }
+  return dedupeStrings(result);
+}
+
+function extractPostText(value, fragments = []) {
+  if (!value) {
+    return fragments.join("").replace(/\n{3,}/g, "\n\n");
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      extractPostText(item, fragments);
+    }
+    return fragments.join("").replace(/\n{3,}/g, "\n\n");
+  }
+  if (typeof value !== "object") {
+    return fragments.join("").replace(/\n{3,}/g, "\n\n");
+  }
+
+  const tag = normalizeIdentifier(value.tag).toLowerCase();
+  if (tag === "text" && typeof value.text === "string") {
+    fragments.push(value.text);
+  } else if ((tag === "a" || tag === "at") && typeof value.text === "string") {
+    fragments.push(value.text);
+  } else if (tag === "br") {
+    fragments.push("\n");
+  }
+
+  for (const child of Object.values(value)) {
+    if (child && typeof child === "object") {
+      extractPostText(child, fragments);
+    }
+  }
+  return fragments.join("").replace(/\n{3,}/g, "\n\n");
+}
+
+function dedupeStrings(values) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function parseCommand(text) {
