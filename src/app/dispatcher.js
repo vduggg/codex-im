@@ -15,6 +15,14 @@ async function onFeishuTextEvent(runtime, event) {
     });
     return;
   }
+  if (normalized.command === "image_message") {
+    await runtime.sendInfoCardMessage({
+      chatId: normalized.chatId,
+      replyToMessageId: normalized.messageId,
+      text: buildImageMessagePendingText(normalized),
+    });
+    return;
+  }
 
   if (await runtime.dispatchTextCommand(normalized)) {
     return;
@@ -102,6 +110,21 @@ function buildUnsupportedMessageText(messageType) {
     `我收到了非文本消息：\`${typeLabel}\`。`,
     "",
     "当前飞书桥暂时只处理文字消息；这类消息还不会进入 Codex。",
+  ].join("\n");
+}
+
+function buildImageMessagePendingText(normalized) {
+  const imageCount = Array.isArray(normalized.attachments)
+    ? normalized.attachments.filter((attachment) => attachment?.kind === "image").length
+    : 0;
+  const statusLine = imageCount > 0
+    ? `我收到图片了，已识别到 ${imageCount} 个图片资源。`
+    : "我收到图片了，但没有从飞书事件里解析到图片资源键。";
+  return [
+    statusLine,
+    "",
+    "现在先停在安全探针阶段：只识别图片，不下载原图，也不会把图片写进 Obsidian。",
+    "下一步会接飞书图片下载和 Codex 多模态/视觉摘要通道。",
   ].join("\n");
 }
 

@@ -30,6 +30,7 @@ function normalizeFeishuNonTextEvent(message, sender, config) {
   if (!messageType) {
     return null;
   }
+  const attachments = extractFeishuMessageAttachments(messageType, message.content);
   return {
     provider: "feishu",
     workspaceId: config.defaultWorkspaceId,
@@ -38,7 +39,8 @@ function normalizeFeishuNonTextEvent(message, sender, config) {
     senderId: sender?.sender_id?.open_id || sender?.sender_id?.user_id || "",
     messageId: message.message_id || "",
     text: "",
-    command: "unsupported_message",
+    command: messageType === "image" ? "image_message" : "unsupported_message",
+    attachments,
     unsupportedMessageType: messageType,
     receivedAt: new Date().toISOString(),
   };
@@ -151,12 +153,30 @@ function mapCodexMessageToImEvent(message) {
 }
 
 function parseFeishuMessageText(rawContent) {
+  const parsed = parseFeishuMessageContent(rawContent);
+  return typeof parsed.text === "string" ? parsed.text.trim() : "";
+}
+
+function parseFeishuMessageContent(rawContent) {
   try {
-    const parsed = JSON.parse(rawContent || "{}");
-    return typeof parsed.text === "string" ? parsed.text.trim() : "";
+    return JSON.parse(rawContent || "{}");
   } catch {
-    return "";
+    return {};
   }
+}
+
+function extractFeishuMessageAttachments(messageType, rawContent) {
+  const parsed = parseFeishuMessageContent(rawContent);
+  if (messageType === "image") {
+    const imageKey = normalizeIdentifier(parsed.image_key || parsed.imageKey || parsed.file_key || parsed.fileKey);
+    return imageKey
+      ? [{
+        kind: "image",
+        resourceKey: imageKey,
+      }]
+      : [];
+  }
+  return [];
 }
 
 function parseCommand(text) {
