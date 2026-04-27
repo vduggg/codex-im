@@ -1,3 +1,6 @@
+const fs = require("fs");
+const path = require("path");
+
 // Feishu SDK adapter and compatibility helpers
 class FeishuClientAdapter {
   constructor(client) {
@@ -222,6 +225,40 @@ class FeishuClientAdapter {
     });
     return normalizeIdentifier(response?.file_key || response?.data?.file_key);
   }
+
+  async downloadMessageResource({ messageId, fileKey, type, filePath = "" }) {
+    const normalizedMessageId = normalizeMessageId(messageId);
+    const normalizedFileKey = normalizeIdentifier(fileKey);
+    const normalizedType = normalizeIdentifier(type);
+    if (!normalizedMessageId || !normalizedFileKey || !normalizedType) {
+      throw new Error("Feishu messageResource.get requires messageId, fileKey, and type");
+    }
+
+    const getResource = resolveGetMessageResourceMethod(this.client);
+    const response = await getResource.call(
+      this.client.im?.v1?.messageResource || this.client.im?.messageResource || this.client,
+      {
+        params: {
+          type: normalizedType,
+        },
+        path: {
+          message_id: normalizedMessageId,
+          file_key: normalizedFileKey,
+        },
+      }
+    );
+
+    if (filePath) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      await response.writeFile(filePath);
+    }
+
+    return {
+      filePath,
+      headers: response.headers || {},
+      getReadableStream: response.getReadableStream,
+    };
+  }
 }
 
 function resolveCreateMessageMethod(client) {
@@ -284,6 +321,14 @@ function resolveCreateFileMethod(client) {
   const fn = client?.im?.v1?.file?.create || client?.im?.file?.create;
   if (typeof fn !== "function") {
     throw new Error("Unsupported Feishu SDK shape: missing file.create");
+  }
+  return fn;
+}
+
+function resolveGetMessageResourceMethod(client) {
+  const fn = client?.im?.v1?.messageResource?.get || client?.im?.messageResource?.get;
+  if (typeof fn !== "function") {
+    throw new Error("Unsupported Feishu SDK shape: missing messageResource.get");
   }
   return fn;
 }
