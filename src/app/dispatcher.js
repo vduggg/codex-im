@@ -39,12 +39,15 @@ async function onFeishuTextEvent(runtime, event) {
       return;
     }
   }
-  const { threadId } = await runtime.resolveWorkspaceThreadState({
+  let { threadId } = await runtime.resolveWorkspaceThreadState({
     bindingKey,
     workspaceRoot,
     normalized,
-    autoSelectThread: true,
+    autoSelectThread: normalized.command !== "image_message",
   });
+  if (normalized.command === "image_message") {
+    threadId = "";
+  }
 
   if (threadId && runtime.activeTurnIdByThreadId.has(threadId)) {
     if (runtime.pendingApprovalByThreadId.has(threadId)) {
