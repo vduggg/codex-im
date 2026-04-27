@@ -1,5 +1,6 @@
 const { spawn } = require("child_process");
 const os = require("os");
+const { pathToFileURL } = require("url");
 const WebSocket = require("ws");
 
 const IS_WINDOWS = os.platform() === "win32";
@@ -205,12 +206,13 @@ class CodexRpcClient {
   async sendUserMessage({
     threadId,
     text,
+    attachments = [],
     model = null,
     effort = null,
     accessMode = null,
     workspaceRoot = "",
   }) {
-    const input = buildTurnInputPayload(text);
+    const input = buildTurnInputPayload(text, attachments);
     return threadId
       ? this.sendRequest(
         "turn/start",
@@ -517,7 +519,7 @@ function buildListThreadsParams({ cursor, limit, sortKey }) {
   return params;
 }
 
-function buildTurnInputPayload(text) {
+function buildTurnInputPayload(text, attachments = []) {
   const normalizedText = normalizeNonEmptyString(text);
   const items = [];
 
@@ -528,7 +530,26 @@ function buildTurnInputPayload(text) {
     });
   }
 
+  for (const attachment of normalizeImageAttachments(attachments)) {
+    items.push({
+      type: "image",
+      url: pathToFileURL(attachment.filePath).href,
+    });
+  }
+
   return items;
+}
+
+function normalizeImageAttachments(attachments) {
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
+  return attachments
+    .filter((attachment) => attachment?.kind === "image" && normalizeNonEmptyString(attachment.filePath))
+    .map((attachment) => ({
+      ...attachment,
+      filePath: normalizeNonEmptyString(attachment.filePath),
+    }));
 }
 
 function buildTurnStartParams({ threadId, input, model, effort, accessMode, workspaceRoot }) {
