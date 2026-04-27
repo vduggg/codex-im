@@ -1,6 +1,7 @@
 const { filterThreadsByWorkspaceRoot } = require("../../shared/workspace-paths");
 const { extractSwitchThreadId } = require("../../shared/command-parsing");
 const codexMessageUtils = require("../../infra/codex/message-utils");
+const memoryBridgeRuntime = require("../memory-bridge/memory-bridge-service");
 
 const THREAD_SOURCE_KINDS = new Set([
   "app",
@@ -24,7 +25,9 @@ async function resolveWorkspaceThreadState(runtime, {
 }) {
   const threads = await refreshWorkspaceThreads(runtime, bindingKey, workspaceRoot, normalized);
   const selectedThreadId = runtime.resolveThreadIdForBinding(bindingKey, workspaceRoot);
-  const threadId = selectedThreadId || (autoSelectThread ? (threads[0]?.id || "") : "");
+  const binding = runtime.sessionStore.getBinding(bindingKey) || {};
+  const shouldAutoSelectThread = autoSelectThread && binding.threadScopedBinding !== true;
+  const threadId = selectedThreadId || (shouldAutoSelectThread ? (threads[0]?.id || "") : "");
   if (!selectedThreadId && threadId) {
     runtime.sessionStore.setThreadIdForWorkspace(
       bindingKey,
@@ -49,10 +52,16 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
       workspaceRoot,
       normalized,
     });
+    await recordInboundSignalSafely({ normalized, workspaceRoot, threadId: createdThreadId });
+    const textWithMemory = await buildMessageWithMemoryPreflightSafely({
+      text: normalized.text,
+      workspaceRoot,
+      threadId: createdThreadId,
+    });
     console.log(`[codex-im] turn/start first message thread=${createdThreadId}`);
     await runtime.codex.sendUserMessage({
       threadId: createdThreadId,
-      text: normalized.text,
+      text: textWithMemory,
       model: codexParams.model || null,
       effort: codexParams.effort || null,
       accessMode: runtime.config.defaultCodexAccessMode,
@@ -65,9 +74,15 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
 
   try {
     await ensureThreadResumed(runtime, threadId);
+    await recordInboundSignalSafely({ normalized, workspaceRoot, threadId });
+    const textWithMemory = await buildMessageWithMemoryPreflightSafely({
+      text: normalized.text,
+      workspaceRoot,
+      threadId,
+    });
     await runtime.codex.sendUserMessage({
       threadId,
-      text: normalized.text,
+      text: textWithMemory,
       model: codexParams.model || null,
       effort: codexParams.effort || null,
       accessMode: runtime.config.defaultCodexAccessMode,
@@ -90,10 +105,16 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
       workspaceRoot,
       normalized,
     });
+    await recordInboundSignalSafely({ normalized, workspaceRoot, threadId: recreatedThreadId });
+    const textWithMemory = await buildMessageWithMemoryPreflightSafely({
+      text: normalized.text,
+      workspaceRoot,
+      threadId: recreatedThreadId,
+    });
     console.log(`[codex-im] turn/start retry thread=${recreatedThreadId}`);
     await runtime.codex.sendUserMessage({
       threadId: recreatedThreadId,
-      text: normalized.text,
+      text: textWithMemory,
       model: codexParams.model || null,
       effort: codexParams.effort || null,
       accessMode: runtime.config.defaultCodexAccessMode,
@@ -102,6 +123,23 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
     runtime.setThreadBindingKey(recreatedThreadId, bindingKey);
     runtime.setThreadWorkspaceRoot(recreatedThreadId, workspaceRoot);
     return recreatedThreadId;
+  }
+}
+
+async function recordInboundSignalSafely(args) {
+  try {
+    await memoryBridgeRuntime.recordInboundSignal(args);
+  } catch (error) {
+    console.warn(`[codex-im] memory signal write skipped: ${error.message}`);
+  }
+}
+
+async function buildMessageWithMemoryPreflightSafely(args) {
+  try {
+    return await memoryBridgeRuntime.buildMessageWithMemoryPreflight(args);
+  } catch (error) {
+    console.warn(`[codex-im] memory preflight skipped: ${error.message}`);
+    return args.text;
   }
 }
 
@@ -142,8 +180,7 @@ async function ensureThreadResumed(runtime, threadId) {
 }
 
 async function handleNewCommand(runtime, normalized) {
-  const bindingKey = runtime.sessionStore.buildBindingKey(normalized);
-  const workspaceRoot = runtime.resolveWorkspaceRootForBinding(bindingKey);
+  const { bindingKey, workspaceRoot } = runtime.getBindingContext(normalized);
   if (!workspaceRoot) {
     await runtime.sendInfoCardMessage({
       chatId: normalized.chatId,

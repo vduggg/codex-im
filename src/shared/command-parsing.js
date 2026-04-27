@@ -22,6 +22,22 @@ function extractEffortValue(text) {
   return extractCommandArgument(text, "/codex effort ");
 }
 
+function extractProfileValue(text) {
+  return extractCommandArgument(text, "/codex profile ");
+}
+
+function extractTodoValue(text) {
+  return extractCommandArgument(text, "/codex todo ");
+}
+
+function extractBridgeValue(text) {
+  return extractCommandArgument(text, "/codex bridge ");
+}
+
+function extractRecallValue(text) {
+  return extractCommandArgument(text, "/codex recall ");
+}
+
 function extractCommandArgument(text, prefix) {
   const trimmed = String(text || "").trim();
   const normalizedPrefix = String(prefix || "").toLowerCase();
@@ -33,9 +49,13 @@ function extractCommandArgument(text, prefix) {
 
 module.exports = {
   extractBindPath,
+  extractBridgeValue,
   extractEffortValue,
   extractModelValue,
+  extractProfileValue,
+  extractRecallValue,
   extractRemoveWorkspacePath,
   extractSendPath,
   extractSwitchThreadId,
+  extractTodoValue,
 };

@@ -151,6 +151,7 @@ function cleanupThreadRuntimeState(runtime, threadId) {
 
   runtime.pendingApprovalByThreadId.delete(threadId);
   runtime.activeTurnIdByThreadId.delete(threadId);
+  runtime.activeTurnStartedAtByThreadId.delete(threadId);
   runtime.pendingChatContextByThreadId.delete(threadId);
   runtime.bindingKeyByThreadId.delete(threadId);
   runtime.workspaceRootByThreadId.delete(threadId);
@@ -164,6 +165,7 @@ function cleanupThreadRuntimeState(runtime, threadId) {
 
 function pruneRuntimeMapSizes(runtime) {
   pruneMapToLimit(runtime.activeTurnIdByThreadId, MAX_THREAD_CONTEXT_CACHE_ENTRIES);
+  pruneMapToLimit(runtime.activeTurnStartedAtByThreadId, MAX_THREAD_CONTEXT_CACHE_ENTRIES);
   pruneMapToLimit(runtime.currentRunKeyByThreadId, MAX_THREAD_CONTEXT_CACHE_ENTRIES);
 }
 

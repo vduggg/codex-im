@@ -24,13 +24,17 @@ function extractThreadId(response) {
   return response?.result?.thread?.id || null;
 }
 
-function mapCodexMessageToImEvent(message) {
+function mapCodexMessageToImEvent(message, options = {}) {
   const method = message?.method;
   const params = message?.params || {};
   const threadId = extractThreadIdentifier(params);
   const turnId = extractTurnIdentifier(params);
+  const suppressCompletedAssistantText = Boolean(options.suppressCompletedAssistantText);
 
   if (isAssistantMessageMethod(method, params)) {
+    if (suppressCompletedAssistantText && method === "item/completed") {
+      return null;
+    }
     const text = extractAssistantText(method, params);
     if (!text) {
       return null;
@@ -92,11 +96,27 @@ function mapCodexMessageToImEvent(message) {
     };
   }
 
+  if (method === "error" && isRecoverableStreamDisconnect(params)) {
+    if (params?.willRetry) {
+      return null;
+    }
+    return {
+      type: "im.run_state",
+      payload: {
+        threadId,
+        turnId,
+        state: "failed",
+        text: extractCodexErrorText(params) || "这次连接断开了，你直接重试我就接着来。",
+      },
+    };
+  }
+
   if (isApprovalRequestMethod(method)) {
     return {
       type: "im.approval_request",
       payload: {
         threadId,
+        turnId,
         reason: params.reason || "",
         command: params.command || "",
       },
@@ -257,6 +277,21 @@ function eventShouldClearPendingReaction(event) {
   return false;
 }
 
+function isRecoverableStreamDisconnect(params) {
+  const message = String(params?.error?.message || "");
+  const details = String(params?.error?.additionalDetails || "");
+  return /stream disconnected|Reconnecting/i.test(message) || /stream disconnected/i.test(details);
+}
+
+function extractCodexErrorText(params) {
+  const message = String(params?.error?.message || "").trim();
+  if (message) {
+    return message;
+  }
+  const details = String(params?.error?.additionalDetails || "").trim();
+  return details;
+}
+
 function extractAssistantText(method, params) {
   if (method === "item/agentMessage/delta") {
     return typeof params?.delta === "string" ? params.delta : "";
@@ -267,6 +302,41 @@ function extractAssistantText(method, params) {
   }
 
   return "";
+}
+
+function trackAssistantDeltaReceipt(deltaSeenByRunKey, message) {
+  const method = message?.method;
+  const params = message?.params || {};
+  const threadId = extractTrackThreadId(params);
+  const turnId = extractTrackTurnId(params);
+  if (!threadId || !turnId) {
+    return;
+  }
+
+  const runKey = buildRunKey(threadId, turnId);
+
+  if (method === "item/agentMessage/delta" && typeof params?.delta === "string" && params.delta) {
+    deltaSeenByRunKey.set(runKey, true);
+    return;
+  }
+
+  if (method === "turn/completed" || method === "turn/failed" || method === "turn/cancelled") {
+    deltaSeenByRunKey.delete(runKey);
+  }
+}
+
+function shouldSuppressCompletedAssistantText(deltaSeenByRunKey, message) {
+  const method = message?.method;
+  const params = message?.params || {};
+  if (method !== "item/completed" || !looksLikeAssistantPayload(params)) {
+    return false;
+  }
+  const threadId = extractTrackThreadId(params);
+  const turnId = extractTrackTurnId(params);
+  if (!threadId || !turnId) {
+    return false;
+  }
+  return deltaSeenByRunKey.get(buildRunKey(threadId, turnId)) === true;
 }
 
 function extractTurnFailureText(params) {
@@ -586,6 +656,8 @@ module.exports = {
   mapCodexMessageToImEvent,
   matchesCommandPrefix,
   normalizeCommandTokens,
+  shouldSuppressCompletedAssistantText,
+  trackAssistantDeltaReceipt,
   trackPendingApproval,
   trackRunKeyState,
   trackRunningTurn,

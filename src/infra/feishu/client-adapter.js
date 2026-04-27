@@ -81,6 +81,106 @@ class FeishuClientAdapter {
     });
   }
 
+  async createCardEntity({ card }) {
+    const createCard = resolveCreateCardMethod(this.client);
+    const response = await createCard.call(this.client.cardkit?.v1?.card || this.client.cardkit?.card || this.client, {
+      data: {
+        type: "card_json",
+        data: JSON.stringify(card),
+      },
+    });
+    assertFeishuBusinessOk(response, "card.create");
+    const cardId = normalizeIdentifier(response?.data?.card_id || response?.card_id);
+    if (!cardId) {
+      throw new Error("Feishu CardKit card.create did not return card_id");
+    }
+    return cardId;
+  }
+
+  async sendCardByCardId({ chatId, cardId, replyToMessageId = "", replyInThread = false }) {
+    const content = JSON.stringify({
+      type: "card",
+      data: { card_id: cardId },
+    });
+    if (replyToMessageId) {
+      const replyMessage = resolveReplyMessageMethod(this.client);
+      return replyMessage.call(this.client.im?.v1?.message || this.client.im?.message || this.client, {
+        path: {
+          message_id: normalizeMessageId(replyToMessageId),
+        },
+        data: {
+          msg_type: "interactive",
+          content,
+          reply_in_thread: replyInThread,
+        },
+      });
+    }
+
+    const createMessage = resolveCreateMessageMethod(this.client);
+    return createMessage.call(this.client.im?.v1?.message || this.client.im?.message || this.client, {
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: chatId,
+        msg_type: "interactive",
+        content,
+      },
+    });
+  }
+
+  async streamCardContent({ cardId, elementId, content, sequence }) {
+    const updateContent = resolveCardElementContentMethod(this.client);
+    const response = await updateContent.call(
+      this.client.cardkit?.v1?.cardElement || this.client.cardkit?.cardElement || this.client,
+      {
+        path: {
+          card_id: cardId,
+          element_id: elementId,
+        },
+        data: {
+          content,
+          sequence,
+        },
+      }
+    );
+    assertFeishuBusinessOk(response, "cardElement.content");
+    return response;
+  }
+
+  async updateCardKitCard({ cardId, card, sequence }) {
+    const updateCard = resolveUpdateCardMethod(this.client);
+    const response = await updateCard.call(this.client.cardkit?.v1?.card || this.client.cardkit?.card || this.client, {
+      path: {
+        card_id: cardId,
+      },
+      data: {
+        card: {
+          type: "card_json",
+          data: JSON.stringify(card),
+        },
+        sequence,
+      },
+    });
+    assertFeishuBusinessOk(response, "card.update");
+    return response;
+  }
+
+  async setCardStreamingMode({ cardId, streamingMode, sequence }) {
+    const updateSettings = resolveCardSettingsMethod(this.client);
+    const response = await updateSettings.call(this.client.cardkit?.v1?.card || this.client.cardkit?.card || this.client, {
+      path: {
+        card_id: cardId,
+      },
+      data: {
+        settings: JSON.stringify({ streaming_mode: Boolean(streamingMode) }),
+        sequence,
+      },
+    });
+    assertFeishuBusinessOk(response, "card.settings");
+    return response;
+  }
+
   async createReaction({ messageId, emojiType }) {
     const createReaction = resolveCreateReactionMethod(this.client);
     return createReaction.call(
@@ -148,6 +248,38 @@ function resolvePatchMessageMethod(client) {
   return fn;
 }
 
+function resolveCreateCardMethod(client) {
+  const fn = client?.cardkit?.v1?.card?.create || client?.cardkit?.card?.create;
+  if (typeof fn !== "function") {
+    throw new Error("Unsupported Feishu SDK shape: missing cardkit.card.create");
+  }
+  return fn;
+}
+
+function resolveUpdateCardMethod(client) {
+  const fn = client?.cardkit?.v1?.card?.update || client?.cardkit?.card?.update;
+  if (typeof fn !== "function") {
+    throw new Error("Unsupported Feishu SDK shape: missing cardkit.card.update");
+  }
+  return fn;
+}
+
+function resolveCardSettingsMethod(client) {
+  const fn = client?.cardkit?.v1?.card?.settings || client?.cardkit?.card?.settings;
+  if (typeof fn !== "function") {
+    throw new Error("Unsupported Feishu SDK shape: missing cardkit.card.settings");
+  }
+  return fn;
+}
+
+function resolveCardElementContentMethod(client) {
+  const fn = client?.cardkit?.v1?.cardElement?.content || client?.cardkit?.cardElement?.content;
+  if (typeof fn !== "function") {
+    throw new Error("Unsupported Feishu SDK shape: missing cardkit.cardElement.content");
+  }
+  return fn;
+}
+
 function resolveCreateFileMethod(client) {
   const fn = client?.im?.v1?.file?.create || client?.im?.file?.create;
   if (typeof fn !== "function") {
@@ -208,6 +340,14 @@ function patchWsClientForCardCallbacks(wsClient) {
 
 function normalizeIdentifier(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function assertFeishuBusinessOk(response, apiName) {
+  const code = Number(response?.code || 0);
+  if (Number.isFinite(code) && code !== 0) {
+    const message = normalizeIdentifier(response?.msg) || normalizeIdentifier(response?.message) || "unknown error";
+    throw new Error(`Feishu ${apiName} failed: ${code} ${message}`);
+  }
 }
 
 function normalizeFileName(fileName) {

@@ -1,5 +1,6 @@
 const { normalizeWorkspacePath } = require("../shared/workspace-paths");
 const {
+  MEMORY_ACTION_CONFIG,
   PANEL_ACTION_CONFIG,
   THREAD_ACTION_CONFIG,
   WORKSPACE_ACTION_CONFIG,
@@ -19,11 +20,19 @@ const TEXT_COMMAND_HANDLER_METHODS = {
   new: "handleNewCommand",
   model: "handleModelCommand",
   effort: "handleEffortCommand",
+  profile: "handleProfileCommand",
+  memory: "handleMemoryCommand",
+  today: "handleTodayCommand",
+  todo: "handleTodoCommand",
+  bridge: "handleBridgeCommand",
+  recall: "handleRecallCommand",
+  hub: "handleHubCommand",
   approve: "handleApprovalCommand",
   reject: "handleApprovalCommand",
 };
 
 const CARD_ACTION_KIND_METHODS = {
+  memory: "handleMemoryCardAction",
   panel: "handlePanelCardAction",
   thread: "handleThreadCardAction",
   workspace: "handleWorkspaceCardAction",
@@ -108,6 +117,53 @@ const WORKSPACE_CARD_ACTIONS = {
   },
 };
 
+const MEMORY_CARD_ACTIONS = {
+  panel: {
+    feedback: MEMORY_ACTION_CONFIG.panel.feedback,
+    run: (runtime, normalized) => runtime.handleMemoryCommand(normalized),
+  },
+  today: {
+    feedback: MEMORY_ACTION_CONFIG.today.feedback,
+    run: (runtime, normalized) => runtime.handleTodayCommand({
+      ...normalized,
+      text: "/codex today",
+      command: "today",
+    }),
+  },
+  todo_list: {
+    feedback: MEMORY_ACTION_CONFIG.todo_list.feedback,
+    run: (runtime, normalized) => runtime.handleTodoCommand({
+      ...normalized,
+      text: "/codex todo list",
+      command: "todo",
+    }),
+  },
+  todo_form: {
+    feedback: MEMORY_ACTION_CONFIG.todo_form.feedback,
+    run: (runtime, normalized) => runtime.handleTodoFormCommand(normalized),
+  },
+  todo_submit: {
+    feedback: MEMORY_ACTION_CONFIG.todo_submit.feedback,
+    validate: (_runtime, _normalized, action) => {
+      const title = String(action?.formValue?.title || action?.formValue?.todo_title || "").trim();
+      return title ? null : { text: MEMORY_ACTION_CONFIG.todo_submit.missingTitleText, kind: "error" };
+    },
+    run: (runtime, normalized, action) => runtime.handleTodoSubmitCardAction(action, normalized),
+  },
+  bridge_today: {
+    feedback: MEMORY_ACTION_CONFIG.bridge_today.feedback,
+    run: (runtime, normalized) => runtime.handleBridgeCommand({
+      ...normalized,
+      text: "/codex bridge",
+      command: "bridge",
+    }),
+  },
+  help: {
+    feedback: MEMORY_ACTION_CONFIG.help.feedback,
+    run: (runtime, normalized) => runtime.handleMemoryHelpCommand(normalized),
+  },
+};
+
 async function dispatchTextCommand(runtime, normalized) {
   const handlerMethod = TEXT_COMMAND_HANDLER_METHODS[normalized.command];
   if (!handlerMethod || typeof runtime[handlerMethod] !== "function") {
@@ -128,6 +184,10 @@ function dispatchCardAction(runtime, action, normalized) {
 
 function handlePanelCardAction(runtime, action, normalized) {
   return executeMappedCardAction(runtime, normalized, action, PANEL_CARD_ACTIONS);
+}
+
+function handleMemoryCardAction(runtime, action, normalized) {
+  return executeMappedCardAction(runtime, normalized, action, MEMORY_CARD_ACTIONS);
 }
 
 function handleThreadCardAction(runtime, action, normalized) {
@@ -208,6 +268,7 @@ function buildPanelSelectAction({ command, feedback, missingValueText }) {
 module.exports = {
   dispatchTextCommand,
   dispatchCardAction,
+  handleMemoryCardAction,
   handlePanelCardAction,
   handleThreadCardAction,
   handleWorkspaceCardAction,

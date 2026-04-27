@@ -3,6 +3,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+logs/
+*.log
+*.log.*
+*.bak
+*.bak.*
+__pycache__/
+*.py[cod]
 
 .env
 .env.local
@@ -16,3 +23,5 @@ dist/
 Thumbs.db
 /.idea/
 /sessions.json
+*.tgz
+*.tar.gz

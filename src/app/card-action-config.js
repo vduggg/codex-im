@@ -50,7 +50,33 @@ const WORKSPACE_ACTION_CONFIG = Object.freeze({
   }),
 });
 
+const MEMORY_ACTION_CONFIG = Object.freeze({
+  panel: Object.freeze({
+    feedback: "正在刷新共同记忆面板...",
+  }),
+  today: Object.freeze({
+    feedback: "正在打开今日桥接摘要...",
+  }),
+  todo_list: Object.freeze({
+    feedback: "正在获取最近待办...",
+  }),
+  todo_form: Object.freeze({
+    feedback: "正在打开待办表单...",
+  }),
+  todo_submit: Object.freeze({
+    feedback: "正在写入待办...",
+    missingTitleText: "待办内容不能为空，请填写后再提交。",
+  }),
+  bridge_today: Object.freeze({
+    feedback: "正在沉淀今天的桥接摘要...",
+  }),
+  help: Object.freeze({
+    feedback: "正在打开共同记忆说明...",
+  }),
+});
+
 module.exports = {
+  MEMORY_ACTION_CONFIG,
   PANEL_ACTION_CONFIG,
   THREAD_ACTION_CONFIG,
   WORKSPACE_ACTION_CONFIG,

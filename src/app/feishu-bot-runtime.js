@@ -4,6 +4,7 @@ const { CodexRpcClient } = require("../infra/codex/rpc-client");
 const {
   buildCardResponse,
   buildCardToast,
+  buildDailyBridgeSummaryCard,
   buildEffortInfoText,
   buildEffortListText,
   buildEffortValidationErrorText,
@@ -11,9 +12,11 @@ const {
   buildModelInfoText,
   buildModelListText,
   buildModelValidationErrorText,
+  buildMemoryBridgePanelCard,
   buildStatusPanelCard,
   buildThreadMessagesSummary,
   buildThreadPickerCard,
+  buildTodoFormCard,
   buildWorkspaceBindingsCard,
   listBoundWorkspaces,
 } = require("../presentation/card/builders");
@@ -22,6 +25,7 @@ const {
   clearPendingReactionForBinding,
   clearPendingReactionForThread,
   disposeReplyRunState,
+  flushAssistantReplyCardNow,
   handleCardAction,
   movePendingReactionToThread,
   patchInteractiveCard,
@@ -44,11 +48,25 @@ const approvalRuntime = require("../domain/approval/approval-service");
 const runtimeState = require("../domain/session/binding-context");
 const threadRuntime = require("../domain/thread/thread-service");
 const workspaceRuntime = require("../domain/workspace/workspace-service");
+const memoryBridgeRuntime = require("../domain/memory-bridge/memory-bridge-service");
+const hubRuntime = require("../domain/hub/hub-service");
 const eventsRuntime = require("./codex-event-service");
 const approvalPolicyRuntime = require("../domain/approval/approval-policy");
 const appDispatcher = require("./dispatcher");
 const { extractModelCatalogFromListResponse } = require("../shared/model-catalog");
+const { extractProfileValue } = require("../shared/command-parsing");
 const fs = require("fs");
+const { spawn } = require("child_process");
+const http = require("http");
+const path = require("path");
+
+const CODEX_APP_SERVER_PROFILES = Object.freeze({
+  main: "",
+  default: "",
+  openai: "",
+  deepseek: "deepseek-pro",
+  "deepseek-pro": "deepseek-pro",
+});
 
 class FeishuBotRuntime {
   constructor(config = readConfig()) {
@@ -58,7 +76,11 @@ class FeishuBotRuntime {
       endpoint: config.codexEndpoint,
       env: process.env,
       codexCommand: config.codexCommand,
+      appServerProfile: config.codexAppServerProfile,
+      requestTimeoutMs: config.codexRpcTimeoutMs,
+      turnStartTimeoutMs: config.codexTurnStartTimeoutMs,
     });
+    this.codexAppServerProfile = config.codexAppServerProfile || "";
     this.lark = null;
     this.client = null;
     this.wsClient = null;
@@ -66,10 +88,17 @@ class FeishuBotRuntime {
     this.pendingChatContextByThreadId = new Map();
     this.pendingChatContextByBindingKey = new Map();
     this.activeTurnIdByThreadId = new Map();
+    this.activeTurnStartedAtByThreadId = new Map();
     this.pendingApprovalByThreadId = new Map();
     this.replyCardByRunKey = new Map();
     this.currentRunKeyByThreadId = new Map();
     this.replyFlushTimersByRunKey = new Map();
+    this.replyFlushInFlightByRunKey = new Map();
+    this.replyFlushQueuedByRunKey = new Set();
+    this.latestTokenUsageByThreadId = new Map();
+    this.toolItemIdsByRunKey = new Map();
+    this.toolTraceByRunKey = new Map();
+    this.assistantDeltaSeenByRunKey = new Map();
     this.pendingReactionByBindingKey = new Map();
     this.pendingReactionByThreadId = new Map();
     this.bindingKeyByThreadId = new Map();
@@ -77,6 +106,8 @@ class FeishuBotRuntime {
     this.approvalAllowlistByWorkspaceRoot = new Map();
     this.inFlightApprovalRequestKeys = new Set();
     this.resumedThreadIds = new Set();
+    this.staleTurnWatchdog = null;
+    this.memoryBridgeScheduler = null;
     this.codex.onMessage((message) => appDispatcher.onCodexMessage(this, message));
   }
 
@@ -87,6 +118,8 @@ class FeishuBotRuntime {
     await this.codex.initialize();
     await this.refreshAvailableModelCatalogAtStartup();
     this.startLongConnection();
+    this.startStaleTurnWatchdog();
+    this.memoryBridgeScheduler = memoryBridgeRuntime.startDailyBridgeScheduler();
     console.log(`[codex-im] feishu-bot runtime ready for app ${maskSecret(this.config.feishu.appId)}`);
   }
 
@@ -173,14 +206,103 @@ class FeishuBotRuntime {
     console.log(`[codex-im] model catalog refreshed at startup: ${models.length} entries`);
   }
 
+  startStaleTurnWatchdog() {
+    const timeoutMs = Number(this.config.staleTurnTimeoutMs || 0);
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || this.staleTurnWatchdog) {
+      return;
+    }
+    const intervalMs = Math.max(30000, Math.min(60000, Math.floor(timeoutMs / 3)));
+    this.staleTurnWatchdog = setInterval(() => {
+      this.clearStaleTurns(timeoutMs).catch((error) => {
+        console.error(`[codex-im] stale turn watchdog failed: ${error.message}`);
+      });
+    }, intervalMs);
+    if (typeof this.staleTurnWatchdog.unref === "function") {
+      this.staleTurnWatchdog.unref();
+    }
+  }
+
+  async clearStaleTurns(timeoutMs) {
+    const now = Date.now();
+    for (const [threadId, startedAt] of this.activeTurnStartedAtByThreadId.entries()) {
+      if (!startedAt || now - startedAt < timeoutMs) {
+        continue;
+      }
+      const context = this.pendingChatContextByThreadId.get(threadId);
+      const turnId = this.activeTurnIdByThreadId.get(threadId) || "";
+      console.warn(`[codex-im] stale turn detected thread=${threadId} turn=${turnId}`);
+      this.cleanupThreadRuntimeState(threadId);
+      if (context?.chatId) {
+        await this.sendInfoCardMessage({
+          chatId: context.chatId,
+          replyToMessageId: context.messageId,
+          text: "检测到 Codex 长时间没有返回完成事件，我已清理飞书端运行状态。可以继续发消息；如果上一个任务仍在终端侧运行，先发 `/codex stop` 再继续更稳。",
+        });
+      }
+    }
+  }
+
   resolveReplyToMessageId(normalized, replyToMessageId = "") {
     return replyToMessageId || normalized.messageId;
   }
 
   getBindingContext(normalized) {
     const bindingKey = this.sessionStore.buildBindingKey(normalized);
-    const workspaceRoot = this.resolveWorkspaceRootForBinding(bindingKey);
+    let workspaceRoot = this.resolveWorkspaceRootForBinding(bindingKey);
+    if (!workspaceRoot) {
+      workspaceRoot = this.inheritThreadBindingFromSender(normalized, bindingKey);
+    }
     return { bindingKey, workspaceRoot };
+  }
+
+  inheritThreadBindingFromSender(normalized, bindingKey) {
+    const threadKey = typeof normalized?.threadKey === "string" ? normalized.threadKey.trim() : "";
+    const messageId = typeof normalized?.messageId === "string" ? normalized.messageId.trim() : "";
+    const hasStableThreadKey = threadKey && threadKey !== messageId;
+    if (!hasStableThreadKey) {
+      return "";
+    }
+
+    const senderBindingKey = this.sessionStore.buildBindingKey({
+      ...normalized,
+      threadKey: "",
+      messageId: "",
+    });
+    if (!senderBindingKey || senderBindingKey === bindingKey) {
+      return "";
+    }
+
+    const inheritedWorkspaceRoot = this.resolveWorkspaceRootForBinding(senderBindingKey);
+    if (!inheritedWorkspaceRoot) {
+      return "";
+    }
+
+    const inheritedParams = this.sessionStore.getCodexParamsForWorkspace(
+      senderBindingKey,
+      inheritedWorkspaceRoot
+    );
+
+    this.sessionStore.setThreadIdForWorkspace(
+      bindingKey,
+      inheritedWorkspaceRoot,
+      "",
+      {
+        workspaceId: normalized.workspaceId,
+        chatId: normalized.chatId,
+        threadKey: normalized.threadKey,
+        senderId: normalized.senderId,
+        inheritedFromBindingKey: senderBindingKey,
+        threadScopedBinding: true,
+      }
+    );
+    if (inheritedParams.model || inheritedParams.effort) {
+      this.sessionStore.setCodexParamsForWorkspace(bindingKey, inheritedWorkspaceRoot, inheritedParams);
+    }
+
+    console.log(
+      `[codex-im] inherited workspace binding from sender binding for feishu thread=${threadKey} workspace=${inheritedWorkspaceRoot}`
+    );
+    return inheritedWorkspaceRoot;
   }
 
   getCurrentThreadContext(normalized) {
@@ -194,6 +316,103 @@ class FeishuBotRuntime {
       throw new Error("Feishu adapter is not initialized");
     }
     return this.feishuAdapter;
+  }
+
+  describeCodexAppServerProfile() {
+    return this.codexAppServerProfile || "main";
+  }
+
+  async switchCodexAppServerProfile(profileAlias) {
+    const rawAlias = String(profileAlias || "").trim().toLowerCase();
+    if (!rawAlias) {
+      return {
+        ok: false,
+        message: `当前 Codex 运行档：${this.describeCodexAppServerProfile()}\n\n用法：\`/codex profile main\` 或 \`/codex profile deepseek\``,
+      };
+    }
+    if (!(rawAlias in CODEX_APP_SERVER_PROFILES)) {
+      return {
+        ok: false,
+        message: "未知运行档。可用：`main`、`deepseek`。",
+      };
+    }
+    if (this.activeTurnIdByThreadId.size > 0) {
+      return {
+        ok: false,
+        message: "当前还有任务在运行。先等完成，或发送 `/codex stop` 后再切换运行档。",
+      };
+    }
+
+    const nextProfile = CODEX_APP_SERVER_PROFILES[rawAlias];
+    const currentProfile = this.codexAppServerProfile || "";
+    if (nextProfile === currentProfile) {
+      return {
+        ok: true,
+        message: `已经是当前运行档：${this.describeCodexAppServerProfile()}`,
+      };
+    }
+
+    if (nextProfile === "deepseek-pro") {
+      await ensureDeepSeekAdapter(process.env);
+    }
+
+    await this.codex.restartSpawn({ appServerProfile: nextProfile });
+    this.codexAppServerProfile = nextProfile;
+    const response = await this.codex.listModels();
+    const models = extractModelCatalogFromListResponse(response);
+    if (models.length) {
+      this.sessionStore.setAvailableModelCatalog(models);
+    }
+    this.resumedThreadIds.clear();
+    return {
+      ok: true,
+      message: `已切换 Codex 运行档：${this.describeCodexAppServerProfile()}`,
+    };
+  }
+
+  async handleProfileCommand(normalized) {
+    const value = extractProfileValue(normalized.text);
+    if (!value) {
+      await this.sendInfoCardMessage({
+        chatId: normalized.chatId,
+        replyToMessageId: normalized.messageId,
+        text: [
+          `当前 Codex 运行档：${this.describeCodexAppServerProfile()}`,
+          "",
+          "用法：",
+          "`/codex profile main`",
+          "`/codex profile deepseek`",
+          "",
+          "说明：该命令会重启飞书桥背后的 Codex app-server；不会修改 OpenClaw。",
+        ].join("\n"),
+      });
+      return;
+    }
+    try {
+      const result = await this.switchCodexAppServerProfile(value);
+      if (result.ok) {
+        const { bindingKey, workspaceRoot } = this.getBindingContext(normalized);
+        if (workspaceRoot) {
+          this.sessionStore.setCodexParamsForWorkspace(bindingKey, workspaceRoot, {
+            model: "",
+            effort: "",
+          });
+        }
+      }
+      await this.sendInfoCardMessage({
+        chatId: normalized.chatId,
+        replyToMessageId: normalized.messageId,
+        text: result.ok
+          ? `${result.message}\n\n当前项目的模型覆盖已清空，将使用该运行档默认模型。`
+          : result.message,
+      });
+    } catch (error) {
+      await this.sendInfoCardMessage({
+        chatId: normalized.chatId,
+        replyToMessageId: normalized.messageId,
+        text: `切换 Codex 运行档失败：${error.message}`,
+      });
+    }
   }
 
   async resolveWorkspaceStats(workspaceRoot) {
@@ -218,16 +437,19 @@ function attachRuntimeForwarders() {
   const plainForwarders = {
     buildCardResponse,
     buildCardToast,
+    buildDailyBridgeSummaryCard,
     buildEffortInfoText,
     buildEffortListText,
     buildEffortValidationErrorText,
     buildHelpCardText,
+    buildMemoryBridgePanelCard,
     buildModelInfoText,
     buildModelListText,
     buildModelValidationErrorText,
     buildStatusPanelCard,
     buildThreadMessagesSummary,
     buildThreadPickerCard,
+    buildTodoFormCard,
     buildWorkspaceBindingsCard,
     listBoundWorkspaces,
   };
@@ -257,6 +479,7 @@ function attachRuntimeForwarders() {
     shouldAutoApproveRequest: approvalPolicyRuntime.shouldAutoApproveRequest,
     tryAutoApproveRequest: approvalPolicyRuntime.tryAutoApproveRequest,
     applyApprovalDecision: approvalRuntime.applyApprovalDecision,
+    sendApprovalPrompt: approvalRuntime.sendApprovalPrompt,
     handleBindCommand: workspaceRuntime.handleBindCommand,
     handleWhereCommand: workspaceRuntime.handleWhereCommand,
     showStatusPanel: workspaceRuntime.showStatusPanel,
@@ -271,6 +494,15 @@ function attachRuntimeForwarders() {
     handleSendCommand: workspaceRuntime.handleSendCommand,
     handleModelCommand: workspaceRuntime.handleModelCommand,
     handleEffortCommand: workspaceRuntime.handleEffortCommand,
+    handleBridgeCommand: memoryBridgeRuntime.handleBridgeCommand,
+    handleMemoryCommand: memoryBridgeRuntime.handleMemoryCommand,
+    handleMemoryHelpCommand: memoryBridgeRuntime.handleMemoryHelpCommand,
+    handleTodayCommand: memoryBridgeRuntime.handleTodayCommand,
+    handleTodoCommand: memoryBridgeRuntime.handleTodoCommand,
+    handleTodoFormCommand: memoryBridgeRuntime.handleTodoFormCommand,
+    handleTodoSubmitCardAction: memoryBridgeRuntime.handleTodoSubmitCardAction,
+    handleRecallCommand: memoryBridgeRuntime.handleRecallCommand,
+    handleHubCommand: hubRuntime.handleHubCommand,
     refreshWorkspaceThreads: threadRuntime.refreshWorkspaceThreads,
     describeWorkspaceStatus: threadRuntime.describeWorkspaceStatus,
     switchThreadById: threadRuntime.switchThreadById,
@@ -284,6 +516,7 @@ function attachRuntimeForwarders() {
     patchInteractiveCard,
     handleCardAction,
     dispatchCardAction: runtimeCommands.dispatchCardAction,
+    handleMemoryCardAction: runtimeCommands.handleMemoryCardAction,
     handlePanelCardAction: runtimeCommands.handlePanelCardAction,
     handleThreadCardAction: runtimeCommands.handleThreadCardAction,
     handleWorkspaceCardAction: runtimeCommands.handleWorkspaceCardAction,
@@ -295,6 +528,7 @@ function attachRuntimeForwarders() {
     switchWorkspaceByPath: workspaceRuntime.switchWorkspaceByPath,
     removeWorkspaceByPath: workspaceRuntime.removeWorkspaceByPath,
     upsertAssistantReplyCard,
+    flushAssistantReplyCardNow,
     addPendingReaction,
     movePendingReactionToThread,
     clearPendingReactionForBinding,
@@ -332,3 +566,75 @@ function maskSecret(value) {
 }
 
 module.exports = { FeishuBotRuntime };
+
+function ensureDeepSeekAdapter(env = process.env) {
+  return new Promise((resolve, reject) => {
+    checkDeepSeekAdapter((isAlive) => {
+      if (isAlive) {
+        resolve();
+        return;
+      }
+      const adapterScript = path.join(env.HOME || "", ".codex", "bin", "start-deepseek-litellm.sh");
+      const adapterEnv = { ...env };
+      if (!adapterEnv.DEEPSEEK_API_KEY) {
+        adapterEnv.DEEPSEEK_API_KEY = readDeepSeekApiKeyFromOpenClaw(env.HOME || "");
+      }
+      if (!adapterEnv.DEEPSEEK_API_KEY) {
+        reject(new Error("DeepSeek API key is missing. Set DEEPSEEK_API_KEY before switching to deepseek."));
+        return;
+      }
+      const outPath = path.join(env.HOME || "", ".codex", "deepseek-adapter.log");
+      const out = fs.openSync(outPath, "a");
+      const child = spawn(adapterScript, [], {
+        env: adapterEnv,
+        detached: true,
+        stdio: ["ignore", out, out],
+      });
+      child.unref();
+      let attempts = 0;
+      const timer = setInterval(() => {
+        attempts += 1;
+        checkDeepSeekAdapter((ready) => {
+          if (ready) {
+            clearInterval(timer);
+            resolve();
+            return;
+          }
+          if (attempts >= 30) {
+            clearInterval(timer);
+            reject(new Error(`DeepSeek adapter failed to start. See ${outPath}`));
+          }
+        });
+      }, 250);
+    });
+  });
+}
+
+function checkDeepSeekAdapter(callback) {
+  const req = http.request({
+    host: "127.0.0.1",
+    port: 4011,
+    path: "/v1/models",
+    method: "GET",
+    timeout: 1000,
+  }, (res) => {
+    res.resume();
+    callback(res.statusCode >= 200 && res.statusCode < 300);
+  });
+  req.on("error", () => callback(false));
+  req.on("timeout", () => {
+    req.destroy();
+    callback(false);
+  });
+  req.end();
+}
+
+function readDeepSeekApiKeyFromOpenClaw(home) {
+  try {
+    const configPath = path.join(home, ".openclaw", "openclaw.json");
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return String(parsed?.models?.providers?.deepseek?.apiKey || "").trim();
+  } catch {
+    return "";
+  }
+}

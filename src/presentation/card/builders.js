@@ -5,7 +5,10 @@ const { normalizeText, resolveEffectiveModelForEffort } = require("../../shared/
 // UI card builders extracted from feishu-bot runtime
 function buildApprovalCard(approval) {
   const requestType = approval?.method && approval.method.includes("command") ? "命令执行" : "敏感操作";
-  const commandLine = formatApprovalCommandInline(approval?.command);
+  const reasonText = formatApprovalReason(approval?.reason);
+  const commandSummary = formatApprovalCommandSummary(approval?.command);
+  const commandTarget = formatApprovalCommandTarget(approval?.command);
+  const commandPreview = formatApprovalCommandPreview(approval?.command);
   return {
     schema: "2.0",
     config: {
@@ -24,12 +27,14 @@ function buildApprovalCard(approval) {
           tag: "markdown",
           content: [
             `请求类型：${requestType}`,
-            approval.reason ? `原因：${escapeCardMarkdown(approval.reason)}` : "",
-            commandLine ? `命令：\`${commandLine}\`` : "",
+            reasonText ? `原因：${escapeCardMarkdown(reasonText)}` : "",
+            commandSummary ? `操作摘要：${escapeCardMarkdown(commandSummary)}` : "",
+            commandTarget ? `目标位置：${escapeCardMarkdown(commandTarget)}` : "",
             "请选择处理方式：",
           ].filter(Boolean).join("\n"),
           text_size: "normal",
         },
+        ...buildApprovalCommandPreviewElements(commandPreview),
         {
           tag: "column_set",
           flex_mode: "none",
@@ -102,15 +107,72 @@ function buildApprovalCard(approval) {
   };
 }
 
-function buildAssistantReplyCard({ text, state }) {
+function buildApprovalCommandPreviewElements(commandPreview) {
+  if (!commandPreview) {
+    return [];
+  }
+  return [
+    {
+      tag: "collapsible_panel",
+      expanded: false,
+      header: {
+        title: {
+          tag: "plain_text",
+          content: "查看命令预览",
+        },
+        icon: {
+          tag: "standard_icon",
+          token: "down-small-ccm_outlined",
+          size: "16px 16px",
+        },
+        icon_position: "follow_text",
+        icon_expanded_angle: -180,
+      },
+      border: { color: "grey", corner_radius: "5px" },
+      padding: "8px 8px 8px 8px",
+      elements: [
+        {
+          tag: "markdown",
+          content: escapeCardMarkdown(commandPreview),
+          text_size: "notation",
+        },
+      ],
+    },
+  ];
+}
+
+function buildAssistantReplyCard({ text, state, incomingText = "", elapsed = "", model = "", toolText = "", thinkingText = "", usageText = "", contextText = "", toolCountText = "" }) {
   const normalizedState = state || "streaming";
   const content = typeof text === "string" && text.trim()
     ? text.trim()
     : normalizedState === "failed"
-      ? "执行失败"
+      ? "这次没有顺利完成。"
       : normalizedState === "completed"
-        ? "执行完成"
-      : "思考中";
+        ? "我已经处理好了。"
+        : "我正在整理正式回复。";
+  const intro = buildAssistantReplyIntro(incomingText);
+  const resolvedToolText = typeof toolText === "string" && toolText.trim()
+    ? toolText.trim()
+    : normalizedState === "streaming"
+      ? "这条消息已经被我接住了。"
+      : normalizedState === "failed"
+        ? "这次处理在运行阶段出了问题。"
+        : "这次回复已经顺利走完。";
+  const resolvedThinkingText = typeof thinkingText === "string" && thinkingText.trim()
+    ? thinkingText.trim()
+    : normalizedState === "streaming"
+      ? "我在整理怎么更稳地回你。"
+      : normalizedState === "failed"
+        ? "我这次没把它收稳，所以先停在这里。"
+        : "我已经把这次回复收好了。";
+  const footer = buildAssistantReplyFooter({
+    status: normalizedState === "failed" ? "未完成" : normalizedState === "completed" ? "已完成" : "正在回复",
+    elapsed,
+    model,
+    usageText,
+    contextText,
+    toolCountText,
+  });
 
   return {
     schema: "2.0",
@@ -118,16 +180,113 @@ function buildAssistantReplyCard({ text, state }) {
       wide_screen_mode: true,
       update_multi: true,
     },
+    header: {
+      title: {
+        tag: "plain_text",
+        content: "❤️ 予安",
+      },
+      template: "red",
+    },
     body: {
       elements: [
         {
           tag: "markdown",
-          content: sanitizeAssistantMarkdown(content),
-          text_size: "normal",
+          content: intro,
+          text_size: "notation",
+        },
+        {
+          tag: "collapsible_panel",
+          expanded: false,
+          header: {
+            title: {
+              tag: "plain_text",
+              content: "🔧 工具执行",
+            },
+            icon: {
+              tag: "standard_icon",
+              token: "down-small-ccm_outlined",
+              size: "16px 16px",
+            },
+            icon_position: "follow_text",
+            icon_expanded_angle: -180,
+          },
+          border: { color: "grey", corner_radius: "5px" },
+          padding: "8px 8px 8px 8px",
+          elements: [
+            {
+              tag: "markdown",
+              content: resolvedToolText,
+              text_size: "notation",
+            },
+          ],
+        },
+        {
+          tag: "collapsible_panel",
+          expanded: false,
+          header: {
+            title: {
+              tag: "plain_text",
+              content: normalizedState === "streaming" ? "💭 正在想" : "💭 思考完成",
+            },
+            icon: {
+              tag: "standard_icon",
+              token: "down-small-ccm_outlined",
+              size: "16px 16px",
+            },
+            icon_position: "follow_text",
+            icon_expanded_angle: -180,
+          },
+          border: { color: "grey", corner_radius: "5px" },
+          padding: "8px 8px 8px 8px",
+          elements: [
+            {
+              tag: "markdown",
+              content: resolvedThinkingText,
+              text_size: "notation",
+            },
+          ],
+        },
+        {
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: sanitizeAssistantMarkdown(content),
+          },
+        },
+        {
+          tag: "markdown",
+          content: footer,
+          text_size: "notation",
         },
       ],
     },
   };
+}
+
+function buildAssistantReplyIntro(incomingText) {
+  const clean = String(incomingText || "").replace(/\s+/g, " ").trim();
+  if (!clean) {
+    return "回复 Jiao";
+  }
+  return `回复 Jiao：${escapeCardMarkdown(clean.slice(0, 120))}`;
+}
+
+function buildAssistantReplyFooter({ status = "已完成", elapsed = "", model = "", usageText = "", contextText = "", toolCountText = "" }) {
+  const parts = [`❤️ ${status}`];
+  if (elapsed) {
+    parts.push(`耗时 ${escapeCardMarkdown(elapsed)}`);
+  }
+  if (toolCountText) {
+    parts.push(escapeCardMarkdown(toolCountText));
+  }
+  if (usageText) {
+    parts.push(escapeCardMarkdown(usageText));
+  }
+  if (contextText) {
+    parts.push(escapeCardMarkdown(contextText));
+  }
+  parts.push(model ? escapeCardMarkdown(model) : "予安-Mira");
+  return parts.join(" · ");
 }
 
 function buildInfoCard(text, { kind = "info" } = {}) {
@@ -155,6 +314,330 @@ function buildInfoCard(text, { kind = "info" } = {}) {
       ],
     },
   };
+}
+
+function buildMemoryBridgePanelCard({
+  vaultRoot = "",
+  bridgeFiles = [],
+  tasks = [],
+  platformStatus = [],
+  todayDate = "",
+} = {}) {
+  const taskLines = Array.isArray(tasks) && tasks.length
+    ? tasks.slice(0, 6).map((task, index) => (
+      `${index + 1}. [${escapeCardMarkdown(task.status || "open")}] ${escapeCardMarkdown(task.title || task.fileName || "未命名")}`
+    ))
+    : ["当前任务池里还没有可展示的待办。"];
+  const statusLines = Array.isArray(platformStatus) && platformStatus.length
+    ? platformStatus.slice(0, 5).map((item) => (
+      `- ${escapeCardMarkdown(item.platform || "Unknown")}：${escapeCardMarkdown(item.detail || item.status || "unknown")}`
+    ))
+    : ["暂时没有读取到 OpenClaw / Hermes / Gateway 状态。"];
+
+  return {
+    schema: "2.0",
+    config: {
+      wide_screen_mode: true,
+      update_multi: true,
+    },
+    header: {
+      title: {
+        tag: "plain_text",
+        content: "🧠 共同记忆桥",
+      },
+      template: "green",
+    },
+    body: {
+      elements: [
+        {
+          tag: "markdown",
+          content: [
+            "**Jiao Knowledge Wiki** 已作为 Codex、Hermes、OpenClaw 的共同事实源。",
+            "",
+            vaultRoot ? `Vault：\`${escapeCardMarkdown(vaultRoot)}\`` : "",
+            todayDate ? `今日摘要：\`${escapeCardMarkdown(todayDate)}\`` : "",
+          ].filter(Boolean).join("\n"),
+          text_size: "normal",
+        },
+        {
+          tag: "column_set",
+          flex_mode: "none",
+          columns: [
+            buildFooterButtonColumn({
+              text: "今日摘要",
+              type: "primary",
+              value: buildMemoryActionValue("today"),
+            }),
+            buildFooterButtonColumn({
+              text: "最近待办",
+              value: buildMemoryActionValue("todo_list"),
+            }),
+            buildFooterButtonColumn({
+              text: "新建待办",
+              value: buildMemoryActionValue("todo_form"),
+            }),
+            buildFooterButtonColumn({
+              text: "沉淀今天",
+              value: buildMemoryActionValue("bridge_today"),
+            }),
+            buildFooterButtonColumn({
+              text: "使用说明",
+              value: buildMemoryActionValue("help"),
+            }),
+            buildFooterButtonColumn({
+              text: "刷新",
+              value: buildMemoryActionValue("panel"),
+            }),
+          ],
+        },
+        { tag: "hr" },
+        {
+          tag: "markdown",
+          content: [
+            "**实时状态**",
+            statusLines.join("\n"),
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**最近待办**",
+            taskLines.join("\n"),
+            "",
+            "写入新待办：发送 `/codex todo <内容>`",
+            "也可以点上方“新建待办”。",
+            "挂起事项：发送 `/codex todo suspend <内容>`",
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**Agent 必读入口**",
+            ...bridgeFiles.slice(0, 4).map((item) => `- \`${escapeCardMarkdown(item)}\``),
+          ].join("\n"),
+          text_size: "notation",
+        },
+      ],
+    },
+  };
+}
+
+function buildDailyBridgeSummaryCard({
+  dateText = "",
+  focus = [],
+  nextActions = [],
+  watches = [],
+  signals = [],
+  tasks = [],
+  platformStatus = [],
+  bridgeFiles = [],
+} = {}) {
+  const statusLines = Array.isArray(platformStatus) && platformStatus.length
+    ? platformStatus.slice(0, 4).map((item) => (
+      `- ${escapeCardMarkdown(item.platform || "Unknown")}：${escapeCardMarkdown(item.detail || item.status || "unknown")}`
+    ))
+    : ["暂时没有读取到平台状态。"];
+  const focusLines = normalizeCardLines(focus, "今天还没有形成可展示的摘要。", 4);
+  const nextLines = normalizeCardLines(nextActions, "暂无自动识别的下一步。", 4);
+  const watchLines = normalizeCardLines(watches, "暂无额外观察项。", 3);
+  const signalLines = Array.isArray(signals) && signals.length
+    ? signals.slice(-5).map((item) => (
+      `- ${escapeCardMarkdown(item.time || "")} ${escapeCardMarkdown(item.message || "未提取消息")}`.trim()
+    ))
+    : ["今日暂无飞书入站信号。"];
+  const taskLines = Array.isArray(tasks) && tasks.length
+    ? tasks.slice(0, 6).map((task, index) => (
+      `${index + 1}. [${escapeCardMarkdown(task.status || "open")}] ${escapeCardMarkdown(task.title || task.fileName || "未命名")}`
+    ))
+    : ["今天暂无任务池变化。"];
+
+  return {
+    schema: "2.0",
+    config: {
+      wide_screen_mode: true,
+      update_multi: true,
+    },
+    header: {
+      title: {
+        tag: "plain_text",
+        content: "🧠 今日记忆摘要",
+      },
+      template: "green",
+    },
+    body: {
+      elements: [
+        {
+          tag: "markdown",
+          content: [
+            dateText ? `日期：\`${escapeCardMarkdown(dateText)}\`` : "",
+            "这是每日桥接的飞书卡片版，只放今天最该看的内容。",
+          ].filter(Boolean).join("\n"),
+          text_size: "normal",
+        },
+        {
+          tag: "column_set",
+          flex_mode: "none",
+          columns: [
+            buildFooterButtonColumn({
+              text: "刷新摘要",
+              type: "primary",
+              value: buildMemoryActionValue("today"),
+            }),
+            buildFooterButtonColumn({
+              text: "最近待办",
+              value: buildMemoryActionValue("todo_list"),
+            }),
+            buildFooterButtonColumn({
+              text: "新建待办",
+              value: buildMemoryActionValue("todo_form"),
+            }),
+            buildFooterButtonColumn({
+              text: "记忆桥",
+              value: buildMemoryActionValue("panel"),
+            }),
+          ],
+        },
+        { tag: "hr" },
+        {
+          tag: "markdown",
+          content: [
+            "**当前最该看**",
+            ...focusLines.map((item) => `- ${escapeCardMarkdown(item)}`),
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**其次处理**",
+            ...nextLines.map((item) => `- ${escapeCardMarkdown(item)}`),
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**需要观察**",
+            ...watchLines.map((item) => `- ${escapeCardMarkdown(item)}`),
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**实时状态**",
+            statusLines.join("\n"),
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**今日飞书信号**",
+            signalLines.join("\n"),
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**今日任务池**",
+            taskLines.join("\n"),
+          ].join("\n"),
+          text_size: "notation",
+        },
+        {
+          tag: "markdown",
+          content: [
+            "**Agent 必读入口**",
+            ...bridgeFiles.slice(0, 4).map((item) => `- \`${escapeCardMarkdown(item)}\``),
+          ].join("\n"),
+          text_size: "notation",
+        },
+      ],
+    },
+  };
+}
+
+function buildTodoFormCard() {
+  return {
+    schema: "2.0",
+    config: {
+      wide_screen_mode: true,
+      update_multi: true,
+    },
+    header: {
+      title: {
+        tag: "plain_text",
+        content: "📝 新建待办",
+      },
+      template: "blue",
+    },
+    body: {
+      elements: [
+        {
+          tag: "markdown",
+          content: "把临时想法、后续动作或挂起事项直接写入 Obsidian TaskNotes。",
+          text_size: "normal",
+        },
+        {
+          tag: "form",
+          name: "todo_form",
+          elements: [
+            {
+              tag: "input",
+              name: "title",
+              label: {
+                tag: "plain_text",
+                content: "待办内容",
+              },
+              label_position: "top",
+              placeholder: {
+                tag: "plain_text",
+                content: "例如：整理 Codex 飞书记忆桥发布说明",
+              },
+              max_length: 160,
+            },
+            buildFormSubmitButton({
+              name: "todo_submit_normal",
+              text: "普通",
+              type: "primary",
+              value: buildMemoryActionValue("todo_submit", {
+                priority: "normal",
+                taskType: "task",
+              }),
+            }),
+            buildFormSubmitButton({
+              name: "todo_submit_high",
+              text: "高优先级",
+              type: "danger",
+              value: buildMemoryActionValue("todo_submit", {
+                priority: "high",
+                taskType: "task",
+              }),
+            }),
+            buildFormSubmitButton({
+              name: "todo_submit_suspended",
+              text: "挂起",
+              value: buildMemoryActionValue("todo_submit", {
+                priority: "normal",
+                taskType: "suspended",
+              }),
+            }),
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function normalizeCardLines(items, fallback, limit) {
+  const lines = Array.isArray(items)
+    ? items.map((item) => String(item || "").replace(/^[-*]\s+/, "").trim()).filter(Boolean)
+    : [];
+  return (lines.length ? lines : [fallback]).slice(0, limit);
 }
 
 function buildThreadRow({ thread, isCurrent, currentThreadStatusText = "" }) {
@@ -354,6 +837,10 @@ function buildStatusPanelCard({
     text: "新建",
     value: buildPanelActionValue("new_thread"),
   }));
+  footerColumns.push(buildFooterButtonColumn({
+    text: "记忆桥",
+    value: buildMemoryActionValue("panel"),
+  }));
   if (isRunning) {
     footerColumns.push(buildFooterButtonColumn({
       text: "停止",
@@ -494,6 +981,35 @@ function buildHelpCardText() {
       "`/codex effort`",
       "`/codex effort <low|medium|high|xhigh>`",
       "查看/设置当前项目的推理强度覆盖。",
+    ],
+    [
+      "**切换 Codex 运行档**",
+      "`/codex profile`",
+      "`/codex profile main`",
+      "`/codex profile deepseek`",
+      "按需切换飞书桥背后的 Codex app-server。",
+    ],
+    [
+      "**共同记忆桥**",
+      "`/codex memory`",
+      "`/codex memory compile`",
+      "`/codex today`",
+      "`/codex today YYYY-MM-DD`",
+      "查看 Jiao Knowledge Wiki 入口、每日桥接摘要，或手动编译 Codex 外置记忆快照。",
+    ],
+    [
+      "**每日沉淀**",
+      "`/codex bridge`",
+      "`/codex bridge <补充说明>`",
+      "更新当天 Obsidian 每日桥接摘要的自动区。",
+    ],
+    [
+      "**TaskNotes 待办**",
+      "`/codex todo <内容>`",
+      "`/codex todo !high <内容>`",
+      "`/codex todo suspend <内容>`",
+      "`/codex todo list`",
+      "把待办或挂起事项写入 Obsidian TaskNotes；也可以在 `/codex memory` 面板点“新建待办”。",
     ],
     [
       "**审批命令**",
@@ -706,7 +1222,9 @@ function mergeReplyText(previousText, nextText) {
 function buildApprovalResolvedCard(approval) {
   const resolutionLabel = approval.resolution === "approved" ? "已批准" : "已拒绝";
   const colorText = approval.resolution === "approved" ? "green" : "red";
-  const commandLine = formatApprovalCommandInline(approval?.command);
+  const reasonText = formatApprovalReason(approval?.reason);
+  const commandSummary = formatApprovalCommandSummary(approval?.command);
+  const commandTarget = formatApprovalCommandTarget(approval?.command);
   return {
     schema: "2.0",
     config: {
@@ -724,8 +1242,9 @@ function buildApprovalResolvedCard(approval) {
         {
           tag: "markdown",
           content: [
-            approval.reason ? `原因：${escapeCardMarkdown(approval.reason)}` : "",
-            commandLine ? `命令：\`${commandLine}\`` : "",
+            reasonText ? `原因：${escapeCardMarkdown(reasonText)}` : "",
+            commandSummary ? `操作摘要：${escapeCardMarkdown(commandSummary)}` : "",
+            commandTarget ? `目标位置：${escapeCardMarkdown(commandTarget)}` : "",
           ].filter(Boolean).join("\n"),
           text_size: "normal",
         },
@@ -734,12 +1253,109 @@ function buildApprovalResolvedCard(approval) {
   };
 }
 
-function formatApprovalCommandInline(command) {
-  const normalized = typeof command === "string" ? command.trim() : "";
+function formatApprovalReason(reason) {
+  const normalized = compactApprovalText(reason);
   if (!normalized) {
     return "";
   }
-  return normalized.replace(/`/g, "\\`");
+  if (/write\s+.*\btask\b.*\bobsidian\b.*\btask\s+pool\b/i.test(normalized)) {
+    return "写入待办到 Obsidian 任务池";
+  }
+  if (/run\s+this\s+command/i.test(normalized)) {
+    return "执行这条命令需要授权";
+  }
+  return truncateApprovalText(normalized, 140);
+}
+
+function formatApprovalCommandSummary(command) {
+  const normalized = compactApprovalText(command);
+  if (!normalized) {
+    return "";
+  }
+  if (/Jiao Knowledge Wiki/.test(normalized) && /任务池|TaskNotes|task pool/i.test(normalized)) {
+    return "写入 Jiao Knowledge Wiki 的 Obsidian 任务池";
+  }
+  if (/\bcat\s*>/.test(normalized) || /<<\s*['"]?EOF['"]?/.test(normalized)) {
+    return "写入本地文件";
+  }
+  if (/\b(perl|sed)\b.*\b(-i|-0pi)\b/.test(normalized)) {
+    return "修改本地文件内容";
+  }
+  if (/\bmv\b/.test(normalized)) {
+    return "移动或重命名文件";
+  }
+  if (/\brm\b/.test(normalized)) {
+    return "删除文件或目录";
+  }
+  if (/\/bin\/(?:zsh|bash|sh)\s+-lc/.test(normalized)) {
+    return "执行本地 shell 命令";
+  }
+  return truncateApprovalText(normalized, 90);
+}
+
+function formatApprovalCommandTarget(command) {
+  const normalized = normalizeApprovalCommand(command);
+  if (!normalized) {
+    return "";
+  }
+  const dirMatch = normalized.match(/(?:^|[\s;])dir=\\?"([^"\n]+)\\?"/);
+  if (dirMatch?.[1]) {
+    return formatApprovalTargetDisplay(dirMatch[1]);
+  }
+  const fileMatch = normalized.match(/(?:^|[\s;])file=\\?"([^"\n]+)\\?"/);
+  if (fileMatch?.[1]) {
+    return formatApprovalTargetDisplay(fileMatch[1]);
+  }
+  const absoluteMatch = normalized.match(/\/Users\/[^"'\n]+/);
+  if (absoluteMatch?.[0]) {
+    return formatApprovalTargetDisplay(absoluteMatch[0]);
+  }
+  return "";
+}
+
+function formatApprovalCommandPreview(command) {
+  const normalized = compactApprovalText(command);
+  if (!normalized) {
+    return "";
+  }
+  return truncateApprovalText(normalized, 160);
+}
+
+function normalizeApprovalCommand(command) {
+  return typeof command === "string" ? command.trim() : "";
+}
+
+function compactApprovalText(value) {
+  return normalizeApprovalCommand(value)
+    .replace(/\\"/g, "\"")
+    .replace(/\\'/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanApprovalPath(value) {
+  return String(value || "")
+    .replace(/\\"/g, "\"")
+    .replace(/\\+$/g, "")
+    .trim();
+}
+
+function formatApprovalTargetDisplay(value) {
+  const cleaned = cleanApprovalPath(value);
+  const wikiMarker = "Jiao Knowledge Wiki/";
+  const wikiIndex = cleaned.indexOf(wikiMarker);
+  if (wikiIndex >= 0) {
+    return truncateApprovalText(cleaned.slice(wikiIndex).replace(/\//g, " / "), 120);
+  }
+  return truncateApprovalText(cleaned, 160);
+}
+
+function truncateApprovalText(value, maxLength) {
+  const normalized = String(value || "").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
 }
 
 function formatThreadLabel(thread) {
@@ -778,7 +1394,15 @@ function buildPanelActionValue(action) {
   };
 }
 
-function buildFooterButtonColumn({ text, value, type = "" }) {
+function buildMemoryActionValue(action, extra = {}) {
+  return {
+    kind: "memory",
+    action,
+    ...extra,
+  };
+}
+
+function buildFooterButtonColumn({ text, value, type = "", actionType = "" }) {
   const button = {
     tag: "button",
     text: { tag: "plain_text", content: text },
@@ -787,11 +1411,28 @@ function buildFooterButtonColumn({ text, value, type = "" }) {
   if (type) {
     button.type = type;
   }
+  if (actionType) {
+    button.action_type = actionType;
+  }
   return {
     tag: "column",
     width: "auto",
     elements: [button],
   };
+}
+
+function buildFormSubmitButton({ name, text, value, type = "" }) {
+  const button = {
+    tag: "button",
+    name,
+    action_type: "form_submit",
+    text: { tag: "plain_text", content: text },
+    value,
+  };
+  if (type) {
+    button.type = type;
+  }
+  return button;
 }
 
 function buildModelSelectElement(codexParams, modelOptions) {
@@ -1156,6 +1797,9 @@ module.exports = {
   buildCardToast,
   buildHelpCardText,
   buildInfoCard,
+  buildDailyBridgeSummaryCard,
+  buildMemoryBridgePanelCard,
+  buildTodoFormCard,
   buildModelInfoText,
   buildModelListText,
   buildModelValidationErrorText,

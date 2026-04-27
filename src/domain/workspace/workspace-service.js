@@ -515,7 +515,7 @@ async function switchWorkspaceByPath(runtime, normalized, workspaceRoot, { reply
     return;
   }
 
-  const bindingKey = runtime.sessionStore.buildBindingKey(normalized);
+  const { bindingKey } = runtime.getBindingContext(normalized);
   const currentWorkspaceRoot = runtime.resolveWorkspaceRootForBinding(bindingKey);
   if (currentWorkspaceRoot && currentWorkspaceRoot === targetWorkspaceRoot) {
     await runtime.sendInfoCardMessage({
@@ -561,7 +561,7 @@ async function removeWorkspaceByPath(runtime, normalized, workspaceRoot, { reply
     return;
   }
 
-  const bindingKey = runtime.sessionStore.buildBindingKey(normalized);
+  const { bindingKey } = runtime.getBindingContext(normalized);
   const currentWorkspaceRoot = runtime.resolveWorkspaceRootForBinding(bindingKey);
   if (currentWorkspaceRoot && currentWorkspaceRoot === targetWorkspaceRoot) {
     await runtime.sendInfoCardMessage({

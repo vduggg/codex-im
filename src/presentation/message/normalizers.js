@@ -4,7 +4,7 @@ function normalizeFeishuTextEvent(event, config) {
   const message = event?.message || {};
   const sender = event?.sender || {};
   if (message.message_type !== "text") {
-    return null;
+    return normalizeFeishuNonTextEvent(message, sender, config);
   }
 
   const text = parseFeishuMessageText(message.content);
@@ -25,10 +25,33 @@ function normalizeFeishuTextEvent(event, config) {
   };
 }
 
+function normalizeFeishuNonTextEvent(message, sender, config) {
+  const messageType = typeof message.message_type === "string" ? message.message_type.trim() : "";
+  if (!messageType) {
+    return null;
+  }
+  return {
+    provider: "feishu",
+    workspaceId: config.defaultWorkspaceId,
+    chatId: message.chat_id || "",
+    threadKey: message.root_id || "",
+    senderId: sender?.sender_id?.open_id || sender?.sender_id?.user_id || "",
+    messageId: message.message_id || "",
+    text: "",
+    command: "unsupported_message",
+    unsupportedMessageType: messageType,
+    receivedAt: new Date().toISOString(),
+  };
+}
+
 function extractCardAction(data) {
   const action = data?.action || {};
   const value = action.value || {};
   if (!value.kind) {
+    const namedAction = extractNamedMemorySubmitAction(action);
+    if (namedAction) {
+      return namedAction;
+    }
     console.log("[codex-im] card callback action missing kind", {
       action,
       hasValue: !!action.value,
@@ -67,7 +90,33 @@ function extractCardAction(data) {
       workspaceRoot: value.workspaceRoot || "",
     };
   }
+  if (value.kind === "memory") {
+    return {
+      kind: value.kind,
+      action: value.action || "",
+      formValue: extractCardFormValue(action, value),
+      priority: value.priority || "",
+      taskType: value.taskType || "",
+    };
+  }
   return null;
+}
+
+function extractNamedMemorySubmitAction(action) {
+  const name = typeof action?.name === "string" ? action.name.trim() : "";
+  if (!name.startsWith("todo_submit_")) {
+    return null;
+  }
+  const formValue = extractCardFormValue(action, {});
+  const isHigh = name === "todo_submit_high";
+  const isSuspended = name === "todo_submit_suspended";
+  return {
+    kind: "memory",
+    action: "todo_submit",
+    formValue,
+    priority: isHigh ? "high" : "normal",
+    taskType: isSuspended ? "suspended" : "task",
+  };
 }
 
 function normalizeCardActionContext(data, config) {
@@ -126,6 +175,13 @@ function parseCommand(text) {
     new: ["new"],
     model: ["model"],
     effort: ["effort"],
+    profile: ["profile"],
+    memory: ["memory"],
+    today: ["today"],
+    todo: ["todo"],
+    bridge: ["bridge"],
+    recall: ["recall"],
+    hub: ["hub"],
     approve: ["approve", "approve workspace"],
     reject: ["reject"],
   };
@@ -153,6 +209,27 @@ function parseCommand(text) {
   }
   if (matchesPrefixCommand(normalized, "effort")) {
     return "effort";
+  }
+  if (matchesPrefixCommand(normalized, "profile")) {
+    return "profile";
+  }
+  if (matchesPrefixCommand(normalized, "memory")) {
+    return "memory";
+  }
+  if (matchesPrefixCommand(normalized, "today")) {
+    return "today";
+  }
+  if (matchesPrefixCommand(normalized, "todo")) {
+    return "todo";
+  }
+  if (matchesPrefixCommand(normalized, "bridge")) {
+    return "bridge";
+  }
+  if (matchesPrefixCommand(normalized, "recall")) {
+    return "recall";
+  }
+  if (matchesPrefixCommand(normalized, "hub")) {
+    return "hub";
   }
   if (prefixes.some((prefix) => normalized.startsWith(prefix))) {
     return "unknown_command";
@@ -187,6 +264,20 @@ function extractCardSelectedValue(action, value) {
     return action.option.trim();
   }
   return typeof value?.selectedValue === "string" ? value.selectedValue.trim() : "";
+}
+
+function extractCardFormValue(action, value) {
+  const formValue = action?.form_value || action?.formValue || value?.form_value || value?.formValue || {};
+  if (!formValue || typeof formValue !== "object") {
+    return {};
+  }
+  if (!formValue.title && formValue.todo_form && typeof formValue.todo_form === "object") {
+    return {
+      ...formValue,
+      ...formValue.todo_form,
+    };
+  }
+  return formValue;
 }
 
 function normalizeIdentifier(value) {

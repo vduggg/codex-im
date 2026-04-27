@@ -84,6 +84,9 @@ codex-im feishu-bot
 
 - `CODEX_IM_DEFAULT_WORKSPACE_ID` 在session中读取当前绑定信息的key，更换key后，原来的信息虽然在session中，但是不会再读取
 - `CODEX_IM_FEISHU_STREAMING_OUTPUT`（默认 `true`，设为 `false` 则等 Codex 完成后一次性输出）
+- `CODEX_IM_CODEX_RPC_TIMEOUT_MS` Codex 普通 RPC 请求超时，默认 `45000`
+- `CODEX_IM_CODEX_TURN_START_TIMEOUT_MS` `turn/start` 请求超时，默认 `60000`
+- `CODEX_IM_STALE_TURN_TIMEOUT_MS` 飞书端运行状态兜底清理时间，默认 `1800000`（30 分钟）
 - `CODEX_IM_WORKSPACE_ALLOWLIST`允许绑定的项目白名单
 - `CODEX_IM_CODEX_ENDPOINT` 用来指定 Codex 的远程 WebSocket RPC 地址，默认是启动本地服务
 - `CODEX_IM_SESSIONS_FILE` session文件路径
@@ -129,6 +132,29 @@ npm run feishu-bot
 - Codex 返回内容后，飞书中以卡片形式持续更新
 - 命令回执和普通对话都会优先回复到触发它的原消息
 - 审批请求会显示为交互卡片
+
+## Gateway 控制
+
+本插件作为独立的 Codex-Feishu Gateway 运行，LaunchAgent 名称为 `com.yuyan.feishu-bridge`。
+它只控制飞书桥接进程，不会停止或修改 Codex 桌面端。
+
+短命令：
+
+```bash
+codex-gateway status
+codex-gateway restart
+codex-gateway stop
+codex-gateway start
+codex-gateway logs
+```
+
+可双击按钮位于：
+
+```text
+/Users/keeploving/Desktop/Codex-Gateway-Buttons/
+```
+
+其中 `Status.command`、`Restart.command`、`Stop.command`、`Start.command` 分别对应查看状态、重启、停止和启动。
 
 ## 开发
 

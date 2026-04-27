@@ -1,5 +1,4 @@
 const codexMessageUtils = require("../../infra/codex/message-utils");
-const { extractCardChatId } = require("../../infra/feishu/client-adapter");
 const { formatFailureText } = require("../../shared/error-text");
 
 function buildApprovalRequestKey(threadId, requestId) {
@@ -91,6 +90,67 @@ function buildApprovalResultText({ decision, scope, method }) {
   return "已允许本次请求。";
 }
 
+function resolveApprovalPromptContext(runtime, threadId, normalized = null) {
+  const existing = runtime.pendingChatContextByThreadId.get(threadId) || null;
+  const bindingKey = runtime.bindingKeyByThreadId.get(threadId) || "";
+  const bindingContext = bindingKey
+    ? runtime.pendingChatContextByBindingKey.get(bindingKey) || null
+    : null;
+
+  return {
+    chatId: normalized?.chatId || existing?.chatId || bindingContext?.chatId || "",
+    replyToMessageId: normalized?.messageId || existing?.messageId || bindingContext?.messageId || "",
+    threadKey: normalized?.threadKey || existing?.threadKey || bindingContext?.threadKey || "",
+  };
+}
+
+async function sendApprovalPrompt(runtime, {
+  threadId,
+  normalized = null,
+  reason = "pending",
+} = {}) {
+  const approval = threadId ? runtime.pendingApprovalByThreadId.get(threadId) || null : null;
+  if (!threadId || !approval) {
+    return false;
+  }
+
+  const context = resolveApprovalPromptContext(runtime, threadId, normalized);
+  if (!context.chatId) {
+    console.error(`[codex-im] approval prompt missing chat context thread=${threadId} reason=${reason}`);
+    return false;
+  }
+
+  approval.chatId = context.chatId;
+  approval.replyToMessageId = context.replyToMessageId || approval.replyToMessageId || "";
+  if (normalized) {
+    runtime.setPendingThreadContext(threadId, normalized);
+  }
+
+  try {
+    const response = await runtime.sendInteractiveApprovalCard({
+      chatId: approval.chatId,
+      approval,
+      replyToMessageId: approval.replyToMessageId || "",
+    });
+    const messageId = codexMessageUtils.extractCreatedMessageId(response);
+    if (messageId) {
+      approval.cardMessageId = messageId;
+    }
+    return true;
+  } catch (error) {
+    console.error(`[codex-im] failed to send approval prompt: ${error.message}`);
+    await runtime.sendInfoCardMessage({
+      chatId: context.chatId,
+      replyToMessageId: context.replyToMessageId || "",
+      text: "当前 Codex 正在等待授权。审批卡发送失败时，可以先发 `/codex approve` 允许本次请求，或发 `/codex reject` 拒绝。",
+      kind: "info",
+    }).catch((fallbackError) => {
+      console.error(`[codex-im] failed to send approval fallback: ${fallbackError.message}`);
+    });
+    return false;
+  }
+}
+
 async function handleApprovalCommand(runtime, normalized) {
   const { workspaceRoot, threadId } = runtime.getCurrentThreadContext(normalized);
   const approval = threadId ? runtime.pendingApprovalByThreadId.get(threadId) || null : null;
@@ -168,16 +228,6 @@ async function handleApprovalCardActionAsync(runtime, action, data) {
     return;
   }
 
-  const chatId = approval.chatId || extractCardChatId(data);
-  if (chatId) {
-    await runtime.sendInfoCardMessage({
-      chatId,
-      replyToMessageId: approval.cardMessageId || approval.replyToMessageId || "",
-      text: "正在处理授权，等待 Codex 继续执行...",
-      kind: "progress",
-    });
-  }
-
   try {
     const outcome = await applyApprovalDecision(runtime, {
       threadId: action.threadId,
@@ -202,4 +252,5 @@ module.exports = {
   applyApprovalDecision,
   handleApprovalCommand,
   handleApprovalCardActionAsync,
+  sendApprovalPrompt,
 };

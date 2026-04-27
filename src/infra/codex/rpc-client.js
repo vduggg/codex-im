@@ -12,10 +12,20 @@ const CODEX_CLIENT_INFO = {
 };
 
 class CodexRpcClient {
-  constructor({ endpoint = "", env = process.env, codexCommand = "" }) {
+  constructor({
+    endpoint = "",
+    env = process.env,
+    codexCommand = "",
+    appServerProfile = "",
+    requestTimeoutMs = 45000,
+    turnStartTimeoutMs = 60000,
+  }) {
     this.endpoint = endpoint;
     this.env = env;
     this.codexCommand = codexCommand || resolveDefaultCodexCommand(env);
+    this.appServerProfile = normalizeNonEmptyString(appServerProfile);
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.turnStartTimeoutMs = turnStartTimeoutMs;
     this.mode = endpoint ? "websocket" : "spawn";
     this.socket = null;
     this.child = null;
@@ -42,7 +52,7 @@ class CodexRpcClient {
 
     for (const command of commandCandidates) {
       try {
-        const spawnSpec = buildSpawnSpec(command);
+        const spawnSpec = buildSpawnSpec(command, this.appServerProfile);
         child = spawn(spawnSpec.command, spawnSpec.args, {
           env: { ...this.env },
           stdio: ["pipe", "pipe", "pipe"],
@@ -70,7 +80,11 @@ class CodexRpcClient {
     this.child = child;
 
     child.on("error", (error) => {
+      if (this.child !== child) {
+        return;
+      }
       this.isReady = false;
+      this.rejectAllPending(error);
       console.error(`[codex-im] failed to spawn Codex app-server via ${selectedCommand || this.codexCommand}: ${error.message}`);
     });
 
@@ -95,18 +109,66 @@ class CodexRpcClient {
     });
 
     child.on("close", (code) => {
+      if (this.child !== child) {
+        return;
+      }
       this.isReady = false;
+      this.rejectAllPending(new Error(`Codex app-server exited with code ${code}`));
       console.error(`[codex-im] codex app-server exited with code ${code}`);
     });
+  }
+
+  async restartSpawn({ appServerProfile = "" } = {}) {
+    if (this.mode === "websocket") {
+      throw new Error("Cannot restart external Codex websocket endpoint from codex-im");
+    }
+    this.appServerProfile = normalizeNonEmptyString(appServerProfile);
+    this.isReady = false;
+    this.rejectAllPending(new Error("Codex app-server restarting"));
+    if (this.child) {
+      const child = this.child;
+      this.child = null;
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (!settled) {
+            settled = true;
+            resolve();
+          }
+        };
+        child.once("close", finish);
+        child.once("exit", finish);
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          finish();
+        }
+        setTimeout(finish, 3000);
+      });
+    }
+    this.stdoutBuffer = "";
+    await this.connectSpawn();
+    await this.initialize();
   }
 
   async connectWebSocket() {
     await new Promise((resolve, reject) => {
       const socket = new WebSocket(this.endpoint);
       this.socket = socket;
+      let opened = false;
 
-      socket.on("open", () => resolve());
-      socket.on("error", (error) => reject(error));
+      socket.on("open", () => {
+        opened = true;
+        resolve();
+      });
+      socket.on("error", (error) => {
+        this.isReady = false;
+        if (!opened) {
+          reject(error);
+          return;
+        }
+        this.rejectAllPending(error);
+      });
       socket.on("message", (chunk) => {
         const message = typeof chunk === "string" ? chunk : chunk.toString("utf8");
         if (message.trim()) {
@@ -115,6 +177,7 @@ class CodexRpcClient {
       });
       socket.on("close", () => {
         this.isReady = false;
+        this.rejectAllPending(new Error("Codex websocket closed"));
       });
     });
   }
@@ -187,16 +250,38 @@ class CodexRpcClient {
     return this.sendRequest("model/list", {});
   }
 
-  async sendRequest(method, params) {
+  async sendRequest(method, params, options = {}) {
     const id = createRequestId();
     const payload = JSON.stringify({ id, method, params });
+    const timeoutMs = options.timeoutMs || this.getRequestTimeoutMs(method);
 
     const responsePromise = new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Codex RPC ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
     });
 
     logCodexOutboundMessage(`request:${method}`, payload);
-    this.sendRaw(payload);
+    try {
+      this.sendRaw(payload);
+    } catch (error) {
+      const pending = this.pending.get(id);
+      this.pending.delete(id);
+      if (pending) {
+        pending.reject(error);
+      }
+    }
     return responsePromise;
   }
 
@@ -235,7 +320,18 @@ class CodexRpcClient {
     }
     logCodexInboundMessage(parsed);
 
-    if (parsed && parsed.id != null && this.pending.has(String(parsed.id))) {
+    if (parsed && parsed.method) {
+      for (const listener of this.messageListeners) {
+        listener(parsed);
+      }
+      return;
+    }
+
+    if (parsed && parsed.id != null) {
+      if (!this.pending.has(String(parsed.id))) {
+        console.warn(`[codex-im] codex<= response for unknown or timed-out request id=${parsed.id}`);
+        return;
+      }
       const { resolve, reject } = this.pending.get(String(parsed.id));
       this.pending.delete(String(parsed.id));
       if (parsed.error) {
@@ -248,6 +344,24 @@ class CodexRpcClient {
 
     for (const listener of this.messageListeners) {
       listener(parsed);
+    }
+  }
+
+  getRequestTimeoutMs(method) {
+    if (method === "turn/start") {
+      return this.turnStartTimeoutMs;
+    }
+    return this.requestTimeoutMs;
+  }
+
+  rejectAllPending(error) {
+    if (!this.pending.size) {
+      return;
+    }
+    const pending = [...this.pending.values()];
+    this.pending.clear();
+    for (const entry of pending) {
+      entry.reject(error);
     }
   }
 }
@@ -266,7 +380,8 @@ function tryParseJson(rawMessage) {
 
 function logCodexOutboundMessage(operation, payload) {
   try {
-    console.log(`[codex-im] codex=> op=${operation} ${payload}`);
+    const summary = summarizeRawCodexPayload(payload);
+    console.log(`[codex-im] codex=> op=${operation} ${summary}`);
   } catch {
     console.log(`[codex-im] codex=> op=${operation} <unserializable payload>`);
   }
@@ -274,10 +389,55 @@ function logCodexOutboundMessage(operation, payload) {
 
 function logCodexInboundMessage(message) {
   try {
-    console.log(`[codex-im] codex<= ${JSON.stringify(message)}`);
+    console.log(`[codex-im] codex<= ${summarizeCodexMessage(message)}`);
   } catch {
     console.log("[codex-im] codex<= <unserializable message>");
   }
+}
+
+function summarizeRawCodexPayload(payload) {
+  const size = Buffer.byteLength(String(payload || ""), "utf8");
+  const parsed = tryParseJson(payload);
+  if (!parsed) {
+    return `bytes=${size} raw=${JSON.stringify(String(payload || "").slice(0, 120))}`;
+  }
+  return `${summarizeCodexMessage(parsed)} payloadBytes=${size}`;
+}
+
+function summarizeCodexMessage(message) {
+  const parts = [];
+  if (message?.id != null) {
+    parts.push(`id=${message.id}`);
+  }
+  if (message?.method) {
+    parts.push(`method=${message.method}`);
+  }
+  const params = message?.params || {};
+  const result = message?.result || {};
+  const threadId = params.threadId || result.thread?.id;
+  const turnId = params.turnId;
+  const itemId = params.itemId || message?.item?.id;
+  if (threadId) {
+    parts.push(`thread=${threadId}`);
+  }
+  if (turnId) {
+    parts.push(`turn=${turnId}`);
+  }
+  if (itemId) {
+    parts.push(`item=${itemId}`);
+  }
+  if (message?.error?.message) {
+    parts.push(`error=${JSON.stringify(message.error.message)}`);
+  }
+  if (result?.data && Array.isArray(result.data)) {
+    parts.push(`resultItems=${result.data.length}`);
+  }
+  if (result?.thread?.turns && Array.isArray(result.thread.turns)) {
+    parts.push(`turns=${result.thread.turns.length}`);
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(message), "utf8");
+  parts.push(`bytes=${bytes}`);
+  return parts.length ? parts.join(" ") : `bytes=${bytes}`;
 }
 
 function logCodexParseFailure(rawMessage) {
@@ -310,17 +470,28 @@ function buildCodexCommandCandidates(configuredCommand) {
   return [DEFAULT_CODEX_COMMAND];
 }
 
-function buildSpawnSpec(command) {
+function buildSpawnSpec(command, appServerProfile = "") {
+  const normalizedProfile = normalizeNonEmptyString(appServerProfile);
   if (IS_WINDOWS) {
+    const args = ["/c", command];
+    if (normalizedProfile) {
+      args.push("--profile", normalizedProfile);
+    }
+    args.push("app-server");
     return {
       command: "cmd.exe",
-      args: ["/c", command, "app-server"],
+      args,
     };
   }
 
+  const args = [];
+  if (normalizedProfile) {
+    args.push("--profile", normalizedProfile);
+  }
+  args.push("app-server");
   return {
     command,
-    args: ["app-server"],
+    args,
   };
 }
 
