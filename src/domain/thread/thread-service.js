@@ -1,7 +1,7 @@
 const { filterThreadsByWorkspaceRoot } = require("../../shared/workspace-paths");
 const { extractSwitchThreadId } = require("../../shared/command-parsing");
 const codexMessageUtils = require("../../infra/codex/message-utils");
-const memoryBridgeRuntime = require("../memory-bridge/memory-bridge-service");
+const memoryBridgeRuntime = require("../../private/extensions/memory-bridge/memory-bridge-service");
 
 const THREAD_SOURCE_KINDS = new Set([
   "app",

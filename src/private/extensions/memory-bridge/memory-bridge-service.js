@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
-const { extractBridgeValue, extractRecallValue, extractTodoValue } = require("../../shared/command-parsing");
+const { extractBridgeValue, extractRecallValue, extractTodoValue } = require("../../../shared/command-parsing");
 
 const execFileAsync = promisify(execFile);
 const VAULT_ROOT = "/Users/keeploving/Library/Mobile Documents/iCloud~md~obsidian/Documents/Jiao Knowledge Wiki";
