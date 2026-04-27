@@ -1,6 +1,5 @@
 const { spawn } = require("child_process");
 const os = require("os");
-const { pathToFileURL } = require("url");
 const WebSocket = require("ws");
 
 const IS_WINDOWS = os.platform() === "win32";
@@ -532,8 +531,8 @@ function buildTurnInputPayload(text, attachments = []) {
 
   for (const attachment of normalizeImageAttachments(attachments)) {
     items.push({
-      type: "image",
-      url: pathToFileURL(attachment.filePath).href,
+      type: "localImage",
+      path: attachment.filePath,
     });
   }
 
