@@ -5,7 +5,8 @@ LABEL="com.yuyan.feishu-bridge"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 DOMAIN="gui/$(id -u)"
 SERVICE="${DOMAIN}/${LABEL}"
-PLUGIN_DIR="$HOME/.codex/plugins/yuyan-codex-im"
+PLUGIN_DIR="$HOME/.codex/plugins/yuan-feishu"
+PROCESS_PATTERN="plugins/(yuan-feishu|yuyan-codex-im)/bin/codex-im.js feishu-bot"
 OUT_LOG="${PLUGIN_DIR}/logs/launchd.out.log"
 ERR_LOG="${PLUGIN_DIR}/logs/launchd.err.log"
 GREEN=$'\033[1;32m'
@@ -15,7 +16,7 @@ RESET=$'\033[0m'
 
 usage() {
   cat <<'USAGE'
-Codex-Feishu Gateway control
+Yuan Feishu Gateway control
 
 Usage:
   codex-gateway status
@@ -39,11 +40,11 @@ print_header() {
 
 print_processes() {
   print_header "Gateway process"
-  ps aux | grep "yuyan-codex-im/bin/codex-im.js feishu-bot" | grep -v grep || true
+  ps aux | grep -E "$PROCESS_PATTERN" | grep -v grep || true
 }
 
 get_gateway_process() {
-  ps aux | grep "yuyan-codex-im/bin/codex-im.js feishu-bot" | grep -v grep || true
+  ps aux | grep -E "$PROCESS_PATTERN" | grep -v grep || true
 }
 
 get_launchctl_field() {
@@ -114,7 +115,7 @@ health_status() {
     recent_errors="$(tail -n 120 "$ERR_LOG" | grep -Eci "error|failed|timeout|ENOTFOUND|disconnected|reset" || true)"
   fi
 
-  print_header "Codex-Feishu Gateway Status"
+  print_header "Yuan Feishu Gateway Status"
 
   local healthy="no"
   if [[ "$loaded" == "yes" && "$state" == "running" && -n "$process_line" ]]; then
