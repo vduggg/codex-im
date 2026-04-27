@@ -4,7 +4,7 @@ const attachmentRuntime = require("../domain/attachments/attachment-service");
 const { formatFailureText } = require("../shared/error-text");
 
 async function onFeishuTextEvent(runtime, event) {
-  const normalized = messageNormalizers.normalizeFeishuTextEvent(event, runtime.config);
+  let normalized = messageNormalizers.normalizeFeishuTextEvent(event, runtime.config);
   if (!normalized) {
     return;
   }
@@ -16,12 +16,7 @@ async function onFeishuTextEvent(runtime, event) {
     });
     return;
   }
-  if (normalized.command === "image_message") {
-    await attachmentRuntime.handleImageMessage(runtime, normalized);
-    return;
-  }
-
-  if (await runtime.dispatchTextCommand(normalized)) {
+  if (normalized.command !== "image_message" && await runtime.dispatchTextCommand(normalized)) {
     return;
   }
 
@@ -31,6 +26,12 @@ async function onFeishuTextEvent(runtime, event) {
   });
   if (!workspaceContext) {
     return;
+  }
+  if (normalized.command === "image_message") {
+    normalized = await attachmentRuntime.prepareImageMessage(runtime, normalized);
+    if (!normalized) {
+      return;
+    }
   }
   const { bindingKey, workspaceRoot } = workspaceContext;
   const { threadId } = await runtime.resolveWorkspaceThreadState({

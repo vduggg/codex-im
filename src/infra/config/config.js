@@ -30,6 +30,14 @@ function readConfig() {
     attachmentsDir: process.env.CODEX_IM_ATTACHMENTS_DIR
       || path.join(os.homedir(), ".codex", "yuan-feishu", "attachments"),
     maxImageBytes: readPositiveIntEnv("CODEX_IM_MAX_IMAGE_BYTES", 10 * 1024 * 1024),
+    vision: {
+      enabled: readBooleanEnv("CODEX_IM_VISION_ENABLED", true),
+      apiKey: readTextEnv("CODEX_IM_VISION_API_KEY") || readTextEnv("OPENAI_API_KEY"),
+      baseUrl: readTextEnv("CODEX_IM_VISION_BASE_URL") || readTextEnv("OPENAI_BASE_URL") || "https://api.openai.com/v1",
+      model: readTextEnv("CODEX_IM_VISION_MODEL") || "gpt-4.1-mini",
+      timeoutMs: readPositiveIntEnv("CODEX_IM_VISION_TIMEOUT_MS", 60000),
+      maxOutputTokens: readPositiveIntEnv("CODEX_IM_VISION_MAX_OUTPUT_TOKENS", 800),
+    },
     sessionsFile: process.env.CODEX_IM_SESSIONS_FILE
       || path.join(os.homedir(), ".codex-im", "sessions.json"),
   };
