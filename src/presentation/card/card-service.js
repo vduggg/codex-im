@@ -2,6 +2,7 @@ const codexMessageUtils = require("../../infra/codex/message-utils");
 const messageNormalizers = require("../message/normalizers");
 const reactionRepo = require("../../infra/feishu/reaction-repo");
 const {
+  buildCardKitAssistantElements,
   formatCardKitAssistantMarkdown,
   sanitizeAssistantMarkdown,
 } = require("../../shared/assistant-markdown");
@@ -449,14 +450,7 @@ function buildCardKitFinalCard(runtime, entry) {
   const footer = buildCardKitFooter(runtime, entry);
   const elements = [
     ...buildCardKitStatusPanels(runtime, runKey, entry),
-    {
-      tag: "markdown",
-      content,
-      text_align: "left",
-      text_size: "normal_v2",
-      margin: "0px 0px 0px 0px",
-      element_id: CARDKIT_STREAMING_ELEMENT_ID,
-    },
+    ...buildCardKitAssistantElements(content, { elementId: CARDKIT_STREAMING_ELEMENT_ID }),
   ];
 
   if (footer) {

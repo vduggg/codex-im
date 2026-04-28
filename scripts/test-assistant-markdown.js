@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
-const { formatCardKitAssistantMarkdown } = require("../src/shared/assistant-markdown");
+const {
+  buildCardKitAssistantElements,
+  formatCardKitAssistantMarkdown,
+} = require("../src/shared/assistant-markdown");
 
 function testLongChineseParagraphSplits() {
   const input = [
@@ -55,7 +58,39 @@ function testDenseReplyBecomesScannableMarkdown() {
   assert.match(output, /\n\n3\. 但它也很危险/);
 }
 
+function testCardKitAssistantElementsSplitRichBlocks() {
+  const input = formatCardKitAssistantMarkdown([
+    "**Patch 功能分析**",
+    "",
+    "这个 patch 目录包含飞书卡片 Footer 的完整实现。",
+    "",
+    "---",
+    "",
+    "做的事：",
+    "",
+    "1. 从 `agent_result` 提取 `model` 和 `api_calls`",
+    "2. 调用 `get_model_context_length(model)`",
+    "",
+    "| 项 | 值 |",
+    "| --- | --- |",
+    "| 模型 | gpt-5.5 |",
+    "",
+    "```python",
+    "response = build_card_json(payload)",
+    "```",
+  ].join("\n"));
+
+  const elements = buildCardKitAssistantElements(input, { elementId: "streaming_content" });
+  assert.ok(elements.length >= 6, JSON.stringify(elements));
+  assert.strictEqual(elements[0].tag, "markdown");
+  assert.strictEqual(elements[0].element_id, "streaming_content");
+  assert.ok(elements.some((element) => element.tag === "hr"));
+  assert.ok(elements.some((element) => element.tag === "markdown" && element.content.includes("| 项 | 值 |")));
+  assert.ok(elements.some((element) => element.tag === "markdown" && element.content.includes("```python")));
+}
+
 testLongChineseParagraphSplits();
 testStructuredMarkdownIsPreserved();
 testDenseReplyBecomesScannableMarkdown();
+testCardKitAssistantElementsSplitRichBlocks();
 console.log("assistant markdown formatting tests passed");

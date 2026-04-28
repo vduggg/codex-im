@@ -37,6 +37,43 @@ function formatCardKitAssistantMarkdown(text) {
   return optimizeCardKitMarkdown(sanitized);
 }
 
+function buildCardKitAssistantElements(content, options = {}) {
+  const blocks = splitCardKitMarkdownBlocks(content);
+  const elementId = typeof options.elementId === "string" ? options.elementId : "";
+  const maxElements = Number.isFinite(options.maxElements) ? Math.max(1, options.maxElements) : 36;
+  const elements = [];
+
+  for (const block of compactCardKitBlocks(blocks, maxElements)) {
+    if (block.type === "hr") {
+      elements.push({ tag: "hr" });
+      continue;
+    }
+    const element = {
+      tag: "markdown",
+      content: block.content,
+      text_align: "left",
+      text_size: block.type === "code" ? "notation" : "normal_v2",
+      margin: elements.length === 0 ? "0px 0px 0px 0px" : "8px 0px 0px 0px",
+    };
+    if (elementId && !elements.some((item) => item.element_id === elementId)) {
+      element.element_id = elementId;
+    }
+    elements.push(element);
+  }
+
+  if (!elements.length) {
+    elements.push({
+      tag: "markdown",
+      content: "我正在整理正式回复。",
+      text_align: "left",
+      text_size: "normal_v2",
+      margin: "0px 0px 0px 0px",
+      ...(elementId ? { element_id: elementId } : {}),
+    });
+  }
+  return elements;
+}
+
 function optimizeCardKitMarkdown(text) {
   const codeBlocks = [];
   const marker = "___CODEX_CARDKIT_CODE_BLOCK_";
@@ -183,6 +220,69 @@ function splitIntoSentences(text) {
   return matches ? matches.map((item) => item.trim()).filter(Boolean) : [text];
 }
 
+function splitCardKitMarkdownBlocks(content) {
+  const blocks = [];
+  const source = String(content || "").trim();
+  if (!source) {
+    return blocks;
+  }
+  const codeFenceRe = /```[\s\S]*?```/g;
+  let cursor = 0;
+  let match = codeFenceRe.exec(source);
+  while (match) {
+    pushTextBlocks(blocks, source.slice(cursor, match.index));
+    blocks.push({ type: "code", content: match[0].trim() });
+    cursor = match.index + match[0].length;
+    match = codeFenceRe.exec(source);
+  }
+  pushTextBlocks(blocks, source.slice(cursor));
+  return blocks;
+}
+
+function pushTextBlocks(blocks, text) {
+  const normalized = String(text || "")
+    .replace(/^\s*[-*_]{3,}\s*$/gm, "\n---\n")
+    .trim();
+  if (!normalized) {
+    return;
+  }
+  for (const part of normalized.split(/\n{2,}/)) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (/^---+$/.test(trimmed)) {
+      blocks.push({ type: "hr" });
+      continue;
+    }
+    blocks.push({
+      type: looksLikeMarkdownTableBlock(trimmed) ? "table" : "markdown",
+      content: trimmed,
+    });
+  }
+}
+
+function compactCardKitBlocks(blocks, maxElements) {
+  if (blocks.length <= maxElements) {
+    return blocks;
+  }
+  const head = blocks.slice(0, maxElements - 1);
+  const tail = blocks.slice(maxElements - 1)
+    .filter((block) => block.type !== "hr")
+    .map((block) => block.content)
+    .filter(Boolean)
+    .join("\n\n");
+  if (tail) {
+    head.push({ type: "markdown", content: tail });
+  }
+  return head;
+}
+
+function looksLikeMarkdownTableBlock(text) {
+  const lines = String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines.length >= 2 && parseMarkdownTableRow(lines[0]) && looksLikeTableSeparator(lines[1]);
+}
+
 function parseMarkdownTableRow(line) {
   const trimmed = String(line || "").trim();
   if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) {
@@ -249,6 +349,7 @@ function clipUtf8ByBytes(input, maxBytes) {
 }
 
 module.exports = {
+  buildCardKitAssistantElements,
   formatCardKitAssistantMarkdown,
   sanitizeAssistantMarkdown,
 };

@@ -164,6 +164,7 @@ function buildMessageWithBridgeCapabilities(text) {
   return [
     "<feishu-bridge-capabilities>",
     "[System note: This Feishu bridge can send current-workspace attachments back to Feishu. If Jiao asks you to send a local image, file, or audio, create or locate the file under the bound workspace, then include a hidden directive on its own line: [[yuan-feishu-send:relative/path/from/workspace]]. The bridge will upload it. Supported routing: images as Feishu image messages, .opus/.mp4 as audio, other files as file messages. Do not use absolute paths in the directive; keep a short human explanation separately.]",
+    "[System note: Replies are shown in Feishu CardKit. Prefer scan-friendly Markdown: short paragraphs, bold section labels, ordered/bulleted lists, Markdown tables for comparisons, fenced code blocks for commands/snippets, and horizontal rules between major sections. Avoid one dense paragraph.]",
     "</feishu-bridge-capabilities>",
     "",
     text,
