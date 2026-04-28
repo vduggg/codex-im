@@ -19,6 +19,7 @@ async function main() {
     setPendingThreadContext: (threadId, normalized) => calls.push(["thread", threadId, normalized.messageId]),
     addPendingReaction: async (bindingKey, messageId) => calls.push(["reaction:add", bindingKey, messageId]),
     ensureThreadAndSendMessage: async (payload) => {
+      calls.push(["send:payload", payload]);
       calls.push(["send", payload.threadId, payload.normalized.messageId]);
       return payload.threadId;
     },
@@ -38,9 +39,14 @@ async function main() {
   runtime.activeTurnIdByThreadId.delete("thread-1");
 
   assert.strictEqual(await drainNextThreadMessage(runtime, "thread-1"), true);
-  assert.strictEqual(getThreadMessageQueueSize(runtime, "thread-1"), 1);
-  assert.deepStrictEqual(calls.find((call) => call[0] === "send"), ["send", "thread-1", "m1"]);
+  assert.strictEqual(getThreadMessageQueueSize(runtime, "thread-1"), 0);
+  assert.deepStrictEqual(calls.find((call) => call[0] === "send"), ["send", "thread-1", "m2"]);
+  const sent = calls.find((call) => call[0] === "send:payload")[1];
+  assert.match(sent.normalized.text, /Ordered Feishu updates:/);
+  assert.match(sent.normalized.text, /message m1/);
+  assert.match(sent.normalized.text, /message m2/);
 
+  enqueueThreadMessage(runtime, "thread-1", buildItem("m3"));
   assert.strictEqual(clearThreadMessageQueue(runtime, "thread-1"), 1);
   assert.strictEqual(getThreadMessageQueueSize(runtime, "thread-1"), 0);
   console.log("message queue fixtures ok");

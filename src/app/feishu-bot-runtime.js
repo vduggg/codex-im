@@ -98,6 +98,7 @@ class FeishuBotRuntime {
     this.pendingReactionByBindingKey = new Map();
     this.pendingReactionByThreadId = new Map();
     this.messageQueueByThreadId = new Map();
+    this.interruptingThreadIds = new Set();
     this.bindingKeyByThreadId = new Map();
     this.workspaceRootByThreadId = new Map();
     this.approvalAllowlistByWorkspaceRoot = new Map();

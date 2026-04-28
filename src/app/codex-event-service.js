@@ -20,6 +20,7 @@ async function handleStopCommand(runtime, normalized) {
       threadId,
       turnId,
     });
+    runtime.interruptingThreadIds.delete(threadId);
     const clearedCount = runtime.clearThreadMessageQueue(threadId);
     runtime.cleanupThreadRuntimeState(threadId);
     await runtime.sendInfoCardMessage({
@@ -30,6 +31,7 @@ async function handleStopCommand(runtime, normalized) {
         : "已发送停止请求，并已清理飞书端运行状态。可以继续发新消息。",
     });
   } catch (error) {
+    runtime.interruptingThreadIds.delete(threadId);
     const clearedCount = runtime.clearThreadMessageQueue(threadId);
     runtime.cleanupThreadRuntimeState(threadId);
     await runtime.sendInfoCardMessage({
@@ -91,6 +93,7 @@ function handleCodexMessage(runtime, message) {
         console.error(`[codex-im] failed to clear pending reaction: ${error.message}`);
       });
       runtime.cleanupThreadRuntimeState(threadId);
+      runtime.interruptingThreadIds.delete(threadId);
       runtime.drainNextThreadMessage(threadId).catch((error) => {
         console.error(`[codex-im] failed to drain queued Feishu message: ${error.message}`);
       });

@@ -27,23 +27,20 @@ async function drainNextThreadMessage(runtime, threadId) {
     return false;
   }
   const queue = runtime.messageQueueByThreadId.get(normalizedThreadId) || [];
-  const next = queue.shift();
-  if (!next) {
+  if (!queue.length) {
     runtime.messageQueueByThreadId.delete(normalizedThreadId);
     return false;
   }
-  if (queue.length) {
-    runtime.messageQueueByThreadId.set(normalizedThreadId, queue);
-  } else {
-    runtime.messageQueueByThreadId.delete(normalizedThreadId);
-  }
+  const batch = queue.splice(0, queue.length);
+  runtime.messageQueueByThreadId.delete(normalizedThreadId);
+  const next = buildGuidanceMessage(batch);
 
   await runtime.sendInfoCardMessage({
     chatId: next.normalized.chatId,
     replyToMessageId: next.normalized.messageId,
-    text: queue.length
-      ? `轮到这条了，我开始处理。后面还排着 ${queue.length} 条。`
-      : "轮到这条了，我开始处理。",
+    text: batch.length > 1
+      ? `我已暂停上一轮，并把刚才 ${batch.length} 条补充合并处理。`
+      : "我已暂停上一轮，按这条补充修正后继续处理。",
   });
 
   runtime.setPendingBindingContext(next.bindingKey, next.normalized);
@@ -70,6 +67,45 @@ async function drainNextThreadMessage(runtime, threadId) {
   }
 }
 
+function buildGuidanceMessage(batch) {
+  if (!batch.length) {
+    return null;
+  }
+  if (batch.length === 1) {
+    const item = batch[0];
+    return {
+      ...item,
+      normalized: {
+        ...item.normalized,
+        text: buildGuidanceText([item]),
+      },
+    };
+  }
+  const last = batch[batch.length - 1];
+  return {
+    ...last,
+    normalized: {
+      ...last.normalized,
+      text: buildGuidanceText(batch),
+      attachments: batch.flatMap((item) => Array.isArray(item.normalized.attachments)
+        ? item.normalized.attachments
+        : []),
+    },
+  };
+}
+
+function buildGuidanceText(batch) {
+  const lines = [
+    "[System note: Jiao sent additional Feishu messages while the previous Codex turn was still running. The bridge interrupted that turn so you can revise the task boundary. Treat the following messages as ordered user updates. Use the latest constraints and answer the revised task, not the stale partial direction.]",
+    "",
+    "Ordered Feishu updates:",
+  ];
+  batch.forEach((item, index) => {
+    lines.push(`${index + 1}. ${normalizeMessageText(item.normalized.text)}`);
+  });
+  return lines.join("\n");
+}
+
 function clearThreadMessageQueue(runtime, threadId) {
   const normalizedThreadId = normalizeIdentifier(threadId);
   if (!normalizedThreadId) {
@@ -86,6 +122,10 @@ function getThreadMessageQueueSize(runtime, threadId) {
     return 0;
   }
   return (runtime.messageQueueByThreadId.get(normalizedThreadId) || []).length;
+}
+
+function normalizeMessageText(text) {
+  return String(text || "").trim() || "[empty message]";
 }
 
 function normalizeIdentifier(value) {

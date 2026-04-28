@@ -80,10 +80,11 @@ async function onFeishuTextEvent(runtime, event) {
       workspaceRoot,
       normalized,
     });
+    const interrupted = await interruptRunningTurnForGuidance(runtime, threadId);
     await runtime.sendInfoCardMessage({
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
-      text: buildQueuedMessageText(queued),
+      text: buildQueuedMessageText(queued, { interrupted }),
     });
     return;
   }
@@ -114,18 +115,48 @@ async function onFeishuTextEvent(runtime, event) {
   }
 }
 
-function buildQueuedMessageText(queued) {
+async function interruptRunningTurnForGuidance(runtime, threadId) {
+  if (runtime.interruptingThreadIds.has(threadId)) {
+    return "already_interrupting";
+  }
+  const turnId = runtime.activeTurnIdByThreadId.get(threadId) || "";
+  if (!turnId) {
+    return "no_active_turn";
+  }
+  runtime.interruptingThreadIds.add(threadId);
+  try {
+    await runtime.codex.sendRequest("turn/interrupt", {
+      threadId,
+      turnId,
+    });
+    return "interrupted";
+  } catch (error) {
+    console.warn(`[codex-im] guidance interrupt failed thread=${threadId}: ${error.message}`);
+    runtime.interruptingThreadIds.delete(threadId);
+    return "failed";
+  }
+}
+
+function buildQueuedMessageText(queued, { interrupted = "" } = {}) {
   if (!queued?.ok) {
     if (queued?.reason === "full") {
       return "当前线程还在运行，消息队列也满了。先等我处理完前面的，或发送 `/codex stop` 中断当前任务。";
     }
     return "当前线程还在运行，这条暂时没能进入队列。先等我处理完前面的，或发送 `/codex stop` 中断当前任务。";
   }
+  if (interrupted === "interrupted" || interrupted === "already_interrupting") {
+    return [
+      "我收到你的补充了，正在暂停上一轮。",
+      "",
+      `这条已进入引导队列，位置：第 ${queued.position} 条。`,
+      "我会把运行期间收到的补充按顺序合并，再按新的任务边界继续回答。",
+    ].join("\n");
+  }
   return [
     "当前线程还在运行，我已经把这条消息排进队列。",
     "",
     `队列位置：第 ${queued.position} 条`,
-    "上一轮结束后我会自动接着处理，不用重发。",
+    "上一轮结束后我会按补充后的任务边界继续处理，不用重发。",
     "如果要放弃当前任务，可以发送 `/codex stop`。",
   ].join("\n");
 }
