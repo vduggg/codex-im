@@ -96,17 +96,18 @@ function mapCodexMessageToImEvent(message, options = {}) {
     };
   }
 
-  if (method === "error" && isRecoverableStreamDisconnect(params)) {
+  if (method === "error") {
     if (params?.willRetry) {
       return null;
     }
+    const text = extractCodexErrorText(params);
     return {
       type: "im.run_state",
       payload: {
         threadId,
         turnId,
         state: "failed",
-        text: extractCodexErrorText(params) || "这次连接断开了，你直接重试我就接着来。",
+        text: text ? `执行失败：${text}` : "执行失败：Codex 返回了错误，但没有给出详细信息。",
       },
     };
   }
@@ -645,6 +646,7 @@ module.exports = {
   buildBindingMetadata,
   buildRunKey,
   eventShouldClearPendingReaction,
+  extractCodexErrorText,
   extractCreatedMessageId,
   extractThreadId,
   extractThreadListCursor,

@@ -48,6 +48,9 @@ function handleCodexMessage(runtime, message) {
   if (typeof message?.method === "string") {
     console.log(`[codex-im] codex event ${message.method}`);
   }
+  if (message?.method === "error") {
+    console.error(`[codex-im] codex error detail: ${codexMessageUtils.extractCodexErrorText(message?.params || {}) || JSON.stringify(message?.params || {})}`);
+  }
   codexMessageUtils.trackAssistantDeltaReceipt(runtime.assistantDeltaSeenByRunKey, message);
   trackLatestTokenUsage(runtime, message);
   trackLatestToolUsage(runtime, message);
