@@ -48,6 +48,7 @@ const approvalRuntime = require("../domain/approval/approval-service");
 const runtimeState = require("../domain/session/binding-context");
 const threadRuntime = require("../domain/thread/thread-service");
 const messageQueueRuntime = require("../domain/thread/message-queue");
+const planRuntime = require("../domain/plan/plan-service");
 const workspaceRuntime = require("../domain/workspace/workspace-service");
 const runtimeExtensions = require("./runtime-extensions");
 const eventsRuntime = require("./codex-event-service");
@@ -548,6 +549,8 @@ function attachRuntimeForwarders() {
     queueCardActionWithFeedback,
     runCardActionTask,
     handleApprovalCardActionAsync: approvalRuntime.handleApprovalCardActionAsync,
+    handlePlanCardAction: planRuntime.handlePlanCardAction,
+    handlePlanCommand: planRuntime.handlePlanCommand,
     sendCardActionFeedbackByContext,
     sendCardActionFeedback,
     switchWorkspaceByPath: workspaceRuntime.switchWorkspaceByPath,

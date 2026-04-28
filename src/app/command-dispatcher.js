@@ -21,6 +21,7 @@ const TEXT_COMMAND_HANDLER_METHODS = {
   model: "handleModelCommand",
   effort: "handleEffortCommand",
   profile: "handleProfileCommand",
+  plan: "handlePlanCommand",
   memory: "handleMemoryCommand",
   today: "handleTodayCommand",
   todo: "handleTodoCommand",
@@ -34,6 +35,7 @@ const TEXT_COMMAND_HANDLER_METHODS = {
 const CARD_ACTION_KIND_METHODS = {
   memory: "handleMemoryCardAction",
   panel: "handlePanelCardAction",
+  plan: "handlePlanCardAction",
   thread: "handleThreadCardAction",
   workspace: "handleWorkspaceCardAction",
 };

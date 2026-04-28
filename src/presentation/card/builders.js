@@ -991,6 +991,13 @@ function buildHelpCardText() {
       "按需切换飞书桥背后的 Codex app-server。",
     ],
     [
+      "**计划模式**",
+      "`/codex plan`",
+      "`/codex plan on`",
+      "`/codex plan off`",
+      "开启后普通消息会先讨论边界和方案，不直接施工；也可以用卡片按钮开关。",
+    ],
+    [
       "**共同记忆桥**",
       "`/codex memory`",
       "`/codex memory compile`",

@@ -1,6 +1,7 @@
 const { filterThreadsByWorkspaceRoot } = require("../../shared/workspace-paths");
 const { extractSwitchThreadId } = require("../../shared/command-parsing");
 const codexMessageUtils = require("../../infra/codex/message-utils");
+const planRuntime = require("../plan/plan-service");
 
 const THREAD_SOURCE_KINDS = new Set([
   "app",
@@ -55,6 +56,7 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
     const textWithMemory = await buildMessageWithMemoryPreflightSafely({
       runtime,
       text: normalized.text,
+      bindingKey,
       workspaceRoot,
       threadId: createdThreadId,
     });
@@ -79,6 +81,7 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
     const textWithMemory = await buildMessageWithMemoryPreflightSafely({
       runtime,
       text: normalized.text,
+      bindingKey,
       workspaceRoot,
       threadId,
     });
@@ -112,6 +115,7 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
     const textWithMemory = await buildMessageWithMemoryPreflightSafely({
       runtime,
       text: normalized.text,
+      bindingKey,
       workspaceRoot,
       threadId: recreatedThreadId,
     });
@@ -140,7 +144,11 @@ async function recordInboundSignalSafely(args) {
 }
 
 async function buildMessageWithMemoryPreflightSafely(args) {
-  const textWithCapabilities = buildMessageWithBridgeCapabilities(args.text);
+  const textWithCapabilities = planRuntime.buildMessageWithPlanMode(args.runtime, {
+    bindingKey: args.bindingKey,
+    workspaceRoot: args.workspaceRoot,
+    text: buildMessageWithBridgeCapabilities(args.text),
+  });
   try {
     const buildMessage = args.runtime?.extensions?.memoryBridge?.buildMessageWithMemoryPreflight;
     return typeof buildMessage === "function"

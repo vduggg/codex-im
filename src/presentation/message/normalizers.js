@@ -107,6 +107,12 @@ function extractCardAction(data) {
       taskType: value.taskType || "",
     };
   }
+  if (value.kind === "plan") {
+    return {
+      kind: value.kind,
+      action: value.action || "",
+    };
+  }
   return null;
 }
 
@@ -328,6 +334,7 @@ function parseCommand(text) {
     model: ["model"],
     effort: ["effort"],
     profile: ["profile"],
+    plan: ["plan"],
     memory: ["memory"],
     today: ["today"],
     todo: ["todo"],
@@ -364,6 +371,9 @@ function parseCommand(text) {
   }
   if (matchesPrefixCommand(normalized, "profile")) {
     return "profile";
+  }
+  if (matchesPrefixCommand(normalized, "plan")) {
+    return "plan";
   }
   if (matchesPrefixCommand(normalized, "memory")) {
     return "memory";
