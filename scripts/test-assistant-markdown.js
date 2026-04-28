@@ -40,6 +40,22 @@ function testStructuredMarkdownIsPreserved() {
   assert.match(output, /```js\nconst value/);
 }
 
+function testDenseReplyBecomesScannableMarkdown() {
+  const input = [
+    "我的判断是： **这个工具值得重点关注，但现在不建议直接安装。 **原因很明确： 1.它解决的是我们的真痛点我们现在确实有Codex、OpenClaw、Hermes、不同模型、不同路由、不同额度的问题。",
+    "`cc-switch`这类工具如果稳定，能把切模型、看用量、备用模型故障转移收成一个统一入口。",
+    "2.它比单纯模型切换更有价值我最在意的不是点一下换模型，而是它的三块能力。",
+    "3.但它也很危险它不是普通App。",
+  ].join("\n\n");
+
+  const output = formatCardKitAssistantMarkdown(input);
+  assert.match(output, /我的判断是：\n\n\*\*这个工具值得重点关注，但现在不建议直接安装。\*\*\n\n原因很明确：/);
+  assert.match(output, /原因很明确：\n\n1\. 它解决的是我们的真痛点/);
+  assert.match(output, /\n\n2\. 它比单纯模型切换更有价值/);
+  assert.match(output, /\n\n3\. 但它也很危险/);
+}
+
 testLongChineseParagraphSplits();
 testStructuredMarkdownIsPreserved();
+testDenseReplyBecomesScannableMarkdown();
 console.log("assistant markdown formatting tests passed");

@@ -45,6 +45,8 @@ function optimizeCardKitMarkdown(text) {
     return `${marker}${index}___`;
   });
 
+  normalized = normalizeMarkdownEmphasis(normalized);
+  normalized = normalizeNumberedListMarkers(normalized);
   normalized = downgradeHeadingsForCardKit(normalized);
   normalized = repairMarkdownTables(normalized);
   normalized = splitLongPlainParagraphs(normalized);
@@ -54,6 +56,27 @@ function optimizeCardKitMarkdown(text) {
   });
 
   return normalized.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function normalizeMarkdownEmphasis(text) {
+  return String(text || "")
+    .replace(/\*\*\s*([^*\n][^*\n]*?)\s*\*\*/g, "**$1**")
+    .replace(/([：:])\s+(\*\*[^*\n]+?\*\*)/g, "$1\n\n$2")
+    .replace(/(\*\*[^*\n]+?[。！？!?；;]\*\*)(?=\S)/g, "$1\n\n")
+    .replace(/(\*\*[^*\n]+?\*\*)\s*([。！？!?；;])\s*/g, "$1$2\n\n");
+}
+
+function normalizeNumberedListMarkers(text) {
+  const lines = String(text || "").split("\n");
+  return lines.map((line) => {
+    if (/^\s*\d{1,2}\.\s+/.test(line)) {
+      return line;
+    }
+    return line
+      .replace(/([：:])\s*(\d{1,2})\.(?=\S)/g, "$1\n\n$2. ")
+      .replace(/([。！？!?；;])\s+(\d{1,2})\.(?=\S)/g, "$1\n\n$2. ")
+      .replace(/^(\s*)(\d{1,2})\.(?=\S)/, "$1$2. ");
+  }).join("\n");
 }
 
 function downgradeHeadingsForCardKit(text) {
