@@ -140,13 +140,26 @@ async function recordInboundSignalSafely(args) {
 }
 
 async function buildMessageWithMemoryPreflightSafely(args) {
+  const textWithCapabilities = buildMessageWithBridgeCapabilities(args.text);
   try {
     const buildMessage = args.runtime?.extensions?.memoryBridge?.buildMessageWithMemoryPreflight;
-    return typeof buildMessage === "function" ? await buildMessage(args) : args.text;
+    return typeof buildMessage === "function"
+      ? await buildMessage({ ...args, text: textWithCapabilities })
+      : textWithCapabilities;
   } catch (error) {
     console.warn(`[codex-im] memory preflight skipped: ${error.message}`);
-    return args.text;
+    return textWithCapabilities;
   }
+}
+
+function buildMessageWithBridgeCapabilities(text) {
+  return [
+    "<feishu-bridge-capabilities>",
+    "[System note: This Feishu bridge can send current-workspace attachments back to Feishu. If Jiao asks you to send a local image, file, or audio, create or locate the file under the bound workspace, then include a hidden directive on its own line: [[yuan-feishu-send:relative/path/from/workspace]]. The bridge will upload it. Supported routing: images as Feishu image messages, .opus/.mp4 as audio, other files as file messages. Do not use absolute paths in the directive; keep a short human explanation separately.]",
+    "</feishu-bridge-capabilities>",
+    "",
+    text,
+  ].join("\n");
 }
 
 async function createWorkspaceThread(runtime, { bindingKey, workspaceRoot, normalized }) {
