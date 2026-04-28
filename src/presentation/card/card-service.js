@@ -192,7 +192,7 @@ async function sendCardActionFeedback(runtime, data, text, kind = "info") {
 
 async function upsertAssistantReplyCard(
   runtime,
-  { threadId, turnId, chatId, text, state, deferFlush = false }
+  { threadId, turnId, chatId, text, statusText, state, deferFlush = false }
 ) {
   if (!threadId || !chatId) {
     return;
@@ -235,12 +235,16 @@ async function upsertAssistantReplyCard(
       cardKitSequence: 0,
       cardKitLastStreamedText: "",
       cardKitLastStatusSignature: "",
+      statusText: "",
       fallbackUsed: false,
     };
   }
 
   if (typeof text === "string" && text.length > 0) {
     existing.text = mergeReplyText(existing.text, text);
+  }
+  if (typeof statusText === "string") {
+    existing.statusText = statusText.trim();
   }
   existing.chatId = chatId;
   existing.replyToMessageId = runtime.pendingChatContextByThreadId.get(threadId)?.messageId || existing.replyToMessageId || "";
@@ -252,6 +256,9 @@ async function upsertAssistantReplyCard(
     if (!(currentIsTerminal && !nextIsTerminal)) {
       existing.state = nextState;
     }
+  }
+  if (existing.state === "completed" || existing.state === "failed") {
+    existing.statusText = "";
   }
   if (resolvedTurnId) {
     existing.turnId = resolvedTurnId;
@@ -266,6 +273,7 @@ async function upsertAssistantReplyCard(
 
   const shouldFlushImmediately = existing.state === "completed"
     || existing.state === "failed"
+    || existing.state === "retrying"
     || (!existing.messageId && typeof existing.text === "string" && existing.text.trim());
   await scheduleReplyCardFlush(runtime, runKey, { immediate: shouldFlushImmediately });
 }
@@ -485,12 +493,13 @@ function buildCardKitStatusPanels(runtime, runKey, entry) {
       content: formatToolTraceText(toolTrace, entry.state),
     }),
     buildCardKitCollapsiblePanel({
-      title: entry.state === "streaming" ? "💭 正在想" : "💭 思考完成",
+      title: buildThinkingPanelTitle(entry.state),
       content: formatThinkingText({
         state: entry.state,
         elapsed,
         toolTrace,
         tokenUsage,
+        statusText: entry.statusText,
       }),
     }),
   ];
@@ -536,6 +545,13 @@ function buildToolPanelTitle(toolItems, state) {
   return "🛠️ 工具执行 · 无额外步骤";
 }
 
+function buildThinkingPanelTitle(state) {
+  if (state === "retrying") {
+    return "💭 模型通道重连中";
+  }
+  return state === "streaming" ? "💭 正在想" : "💭 思考完成";
+}
+
 function buildCardKitStreamingContent(entry) {
   return formatCardKitAssistantMarkdown(resolveAssistantReplyContent(entry));
 }
@@ -546,6 +562,7 @@ function buildCardKitStatusSignature(runtime, runKey, entry) {
   const tokenUsage = runtime.latestTokenUsageByThreadId.get(entry.threadId);
   return JSON.stringify({
     state: entry.state,
+    statusText: entry.statusText || "",
     toolCount: toolItems instanceof Set ? toolItems.size : 0,
     toolTrace: Array.isArray(toolTrace) ? toolTrace.filter(Boolean) : [],
     reasoning: Number(tokenUsage?.last?.reasoningOutputTokens || 0),
@@ -563,6 +580,9 @@ function resolveAssistantReplyContent(entry) {
   if (entry.state === "completed") {
     return "我已经处理好了。";
   }
+  if (entry.state === "retrying") {
+    return entry.statusText || "模型通道正在重连。";
+  }
   return "我正在整理正式回复。";
 }
 
@@ -572,6 +592,8 @@ function buildCardKitFooter(runtime, entry) {
     parts.push("未完成");
   } else if (entry.state === "completed") {
     parts.push("已完成");
+  } else if (entry.state === "retrying") {
+    parts.push("模型通道重连中");
   } else {
     parts.push("正在回复");
   }
@@ -617,6 +639,9 @@ function buildCardKitSummary(content, state) {
   }
   if (state === "completed") {
     return "我已经处理好了。";
+  }
+  if (state === "retrying") {
+    return "模型通道重连中。";
   }
   return "正在回复。";
 }
@@ -834,9 +859,14 @@ function formatToolTraceText(toolTrace, state) {
   return steps.map((step) => `- ${step}`).join("\n");
 }
 
-function formatThinkingText({ state, elapsed, toolTrace, tokenUsage }) {
+function formatThinkingText({ state, elapsed, toolTrace, tokenUsage, statusText = "" }) {
   const steps = Array.isArray(toolTrace) ? toolTrace.filter(Boolean) : [];
   const reasoningTokens = Number(tokenUsage?.last?.reasoningOutputTokens || 0);
+  if (state === "retrying") {
+    return statusText
+      ? `${statusText}\n\n这说明飞书消息已经进入 Codex，但当前模型供应商链路还没稳定返回。`
+      : "模型供应商链路正在重连；飞书桥已经收到消息，正在等待 Codex 自动恢复。";
+  }
   if (state === "failed") {
     return elapsed
       ? `这轮在 ${elapsed} 左右断流了，我没把它完整收住。`

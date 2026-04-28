@@ -338,6 +338,14 @@ async function deliverToFeishu(runtime, event) {
         text: event.payload.text || "执行失败",
         state: "failed",
       });
+    } else if (event.payload.state === "retrying") {
+      await runtime.upsertAssistantReplyCard({
+        threadId: event.payload.threadId,
+        turnId: event.payload.turnId,
+        chatId: event.payload.chatId,
+        statusText: event.payload.text || "模型通道重连中，正在等待 Codex 自动恢复。",
+        state: "retrying",
+      });
     }
     return;
   }

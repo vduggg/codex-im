@@ -98,7 +98,16 @@ function mapCodexMessageToImEvent(message, options = {}) {
 
   if (method === "error") {
     if (params?.willRetry) {
-      return null;
+      const text = extractCodexRetryText(params);
+      return {
+        type: "im.run_state",
+        payload: {
+          threadId,
+          turnId,
+          state: "retrying",
+          text: text ? `模型通道重连中：${text}` : "模型通道重连中，正在等待 Codex 自动恢复。",
+        },
+      };
     }
     const text = extractCodexErrorText(params);
     return {
@@ -291,6 +300,19 @@ function extractCodexErrorText(params) {
   }
   const details = String(params?.error?.additionalDetails || "").trim();
   return details;
+}
+
+function extractCodexRetryText(params) {
+  const message = extractCodexErrorText(params);
+  if (message) {
+    return message;
+  }
+  const attempt = Number(params?.retryAttempt || params?.attempt || 0);
+  const maxAttempts = Number(params?.maxRetries || params?.maxAttempts || 0);
+  if (attempt > 0 && maxAttempts > 0) {
+    return `Reconnecting... ${attempt}/${maxAttempts}`;
+  }
+  return "";
 }
 
 function extractAssistantText(method, params) {
@@ -647,6 +669,7 @@ module.exports = {
   buildRunKey,
   eventShouldClearPendingReaction,
   extractCodexErrorText,
+  extractCodexRetryText,
   extractCreatedMessageId,
   extractThreadId,
   extractThreadListCursor,

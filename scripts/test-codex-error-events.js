@@ -31,9 +31,17 @@ const retrying = mapCodexMessageToImEvent({
     threadId: "thread-1",
     turnId: "turn-1",
     willRetry: true,
-    error: { message: "stream disconnected" },
+    error: { message: "Reconnecting... 3/5" },
   },
 });
 
-assert.strictEqual(retrying, null);
+assert.deepStrictEqual(retrying, {
+  type: "im.run_state",
+  payload: {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    state: "retrying",
+    text: "模型通道重连中：Reconnecting... 3/5",
+  },
+});
 console.log("codex error event fixtures ok");
