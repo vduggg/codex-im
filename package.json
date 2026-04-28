@@ -33,6 +33,7 @@
   "scripts": {
     "feishu-bot": "node ./bin/codex-im.js",
     "check": "find src bin scripts -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "test:markdown": "node ./scripts/test-assistant-markdown.js",
     "test:directives": "node ./scripts/test-outbound-directives.js",
     "test:media": "node ./scripts/test-media-fixtures.js",
     "test:plan": "node ./scripts/test-plan-mode.js",

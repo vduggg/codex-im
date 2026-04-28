@@ -1,4 +1,7 @@
 const ASSISTANT_REPLY_MAX_BYTES = 24 * 1024;
+const LONG_PARAGRAPH_MIN_CHARS = 240;
+const READABLE_PARAGRAPH_TARGET_CHARS = 140;
+const READABLE_PARAGRAPH_MAX_CHARS = 220;
 const DANGEROUS_HTML_TAG_RE = /<\/?(script|style|iframe|object|embed|meta|link)[^>]*>/gi;
 const DANGEROUS_LINK_RE = /(\]\()\s*(javascript:|data:text\/html)[^)]+(\))/gi;
 
@@ -44,6 +47,7 @@ function optimizeCardKitMarkdown(text) {
 
   normalized = downgradeHeadingsForCardKit(normalized);
   normalized = repairMarkdownTables(normalized);
+  normalized = splitLongPlainParagraphs(normalized);
 
   codeBlocks.forEach((block, index) => {
     normalized = normalized.replace(`${marker}${index}___`, `\n\n${block}\n\n`);
@@ -97,6 +101,63 @@ function repairMarkdownTables(text) {
   }
 
   return output.join("\n");
+}
+
+function splitLongPlainParagraphs(text) {
+  return String(text || "")
+    .split(/\n{2,}/)
+    .map((block) => {
+      if (!shouldSplitPlainParagraph(block)) {
+        return block;
+      }
+      return splitParagraphIntoReadableChunks(block).join("\n\n");
+    })
+    .join("\n\n");
+}
+
+function shouldSplitPlainParagraph(block) {
+  const trimmed = String(block || "").trim();
+  if (trimmed.length < LONG_PARAGRAPH_MIN_CHARS) {
+    return false;
+  }
+  if (/\n\s*(?:[-*+]|\d+\.)\s+/.test(block) || /^\s{0,3}#{1,6}\s+/m.test(block)) {
+    return false;
+  }
+  if (/^\s*\|.+\|\s*$/m.test(block)) {
+    return false;
+  }
+  if (block.includes("___CODEX_CARDKIT_CODE_BLOCK_")) {
+    return false;
+  }
+  return true;
+}
+
+function splitParagraphIntoReadableChunks(block) {
+  const sentences = splitIntoSentences(String(block || "").replace(/\s*\n\s*/g, " ").trim());
+  if (sentences.length <= 1) {
+    return [block];
+  }
+
+  const chunks = [];
+  let current = "";
+  for (const sentence of sentences) {
+    const next = current ? `${current}${sentence}` : sentence;
+    if (current && (next.length > READABLE_PARAGRAPH_TARGET_CHARS || current.length >= READABLE_PARAGRAPH_MAX_CHARS)) {
+      chunks.push(current.trim());
+      current = sentence;
+      continue;
+    }
+    current = next;
+  }
+  if (current.trim()) {
+    chunks.push(current.trim());
+  }
+  return chunks.length > 1 ? chunks : [block];
+}
+
+function splitIntoSentences(text) {
+  const matches = String(text || "").match(/[^。！？!?；;]+[。！？!?；;]+(?:[”’"'）)\]]+)?\s*|[^。！？!?；;]+$/g);
+  return matches ? matches.map((item) => item.trim()).filter(Boolean) : [text];
 }
 
 function parseMarkdownTableRow(line) {
