@@ -27,11 +27,52 @@ async function handlePlanCommand(runtime, normalized, action = null) {
 }
 
 function handlePlanCardAction(runtime, action, normalized) {
+  if (action.action === "execute") {
+    return runtime.queueCardActionWithFeedback(
+      normalized,
+      "正在确认执行计划...",
+      () => executeConfirmedPlan(runtime, action, normalized)
+    );
+  }
   return runtime.queueCardActionWithFeedback(
     normalized,
     "正在切换计划模式...",
     () => runtime.handlePlanCommand(normalized, action)
   );
+}
+
+async function executeConfirmedPlan(runtime, action, normalized) {
+  const threadId = normalizeIdentifier(action.threadId);
+  const workspaceRoot = normalizeWorkspacePath(
+    action.workspaceRoot
+      || runtime.resolveWorkspaceRootForThread(threadId)
+      || runtime.workspaceRootByThreadId.get(threadId)
+      || ""
+  );
+  const bindingKey = runtime.bindingKeyByThreadId.get(threadId)
+    || runtime.sessionStore.buildBindingKey(normalized);
+  if (!threadId || !workspaceRoot || !bindingKey) {
+    await runtime.sendInfoCardMessage({
+      chatId: normalized.chatId,
+      replyToMessageId: normalized.messageId,
+      text: "无法确认执行：没有找到对应线程或项目。请先发 `/codex where` 检查当前绑定。",
+    });
+    return;
+  }
+  setPlanMode(runtime, bindingKey, workspaceRoot, false);
+  const executeMessage = {
+    ...normalized,
+    text: "Jiao 已在飞书计划卡片中确认执行。请按上一条 <proposed_plan> 的方案开始实施；如果执行前发现计划已过期或有高风险，先说明最小阻塞点。",
+    command: "message",
+  };
+  runtime.setPendingBindingContext(bindingKey, executeMessage);
+  runtime.setPendingThreadContext(threadId, executeMessage);
+  await runtime.ensureThreadAndSendMessage({
+    bindingKey,
+    workspaceRoot,
+    normalized: executeMessage,
+    threadId,
+  });
 }
 
 function getPlanMode(runtime, bindingKey, workspaceRoot) {
@@ -120,6 +161,86 @@ function buildPlanModeCard({ workspaceRoot, enabled }) {
   };
 }
 
+async function maybeSendPlanConfirmationCard(runtime, { threadId = "", turnId = "", chatId = "", text = "" } = {}) {
+  if (!threadId || !turnId || !chatId || !hasCompletedProposedPlan(text)) {
+    return false;
+  }
+  const key = `${threadId}:${turnId}`;
+  if (runtime.planConfirmationKeys.has(key)) {
+    return false;
+  }
+  runtime.planConfirmationKeys.add(key);
+  const workspaceRoot = runtime.resolveWorkspaceRootForThread(threadId)
+    || runtime.workspaceRootByThreadId.get(threadId)
+    || "";
+  await runtime.sendInteractiveCard({
+    chatId,
+    card: buildPlanConfirmationCard({
+      threadId,
+      workspaceRoot,
+    }),
+  });
+  return true;
+}
+
+function buildPlanConfirmationCard({ threadId, workspaceRoot }) {
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      title: { tag: "plain_text", content: "计划待确认" },
+      template: "blue",
+    },
+    elements: [
+      {
+        tag: "div",
+        text: {
+          tag: "lark_md",
+          content: [
+            "我已经整理出计划。",
+            "",
+            "点“执行计划”后，我会关闭计划模式，并按上面的方案开始实施。",
+            "点“继续讨论”则保持计划模式，你可以继续补充边界。",
+            workspaceRoot ? `\n项目：\`${workspaceRoot}\`` : "",
+          ].filter(Boolean).join("\n"),
+        },
+      },
+      {
+        tag: "action",
+        actions: [
+          {
+            tag: "button",
+            text: { tag: "plain_text", content: "执行计划" },
+            type: "primary",
+            value: {
+              ...buildPlanActionValue("execute"),
+              threadId,
+              workspaceRoot,
+            },
+          },
+          {
+            tag: "button",
+            text: { tag: "plain_text", content: "继续讨论" },
+            value: {
+              ...buildPlanActionValue("on"),
+              threadId,
+              workspaceRoot,
+            },
+          },
+          {
+            tag: "button",
+            text: { tag: "plain_text", content: "退出计划模式" },
+            value: {
+              ...buildPlanActionValue("off"),
+              threadId,
+              workspaceRoot,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function buildPlanActionValue(action) {
   return {
     kind: "plan",
@@ -138,9 +259,19 @@ function parsePlanCommand(text) {
   return "status";
 }
 
+function hasCompletedProposedPlan(text) {
+  const value = String(text || "");
+  return /<proposed_plan>[\s\S]*<\/proposed_plan>/i.test(value);
+}
+
+function normalizeIdentifier(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
 module.exports = {
   buildMessageWithPlanMode,
   getPlanMode,
   handlePlanCardAction,
   handlePlanCommand,
+  maybeSendPlanConfirmationCard,
 };

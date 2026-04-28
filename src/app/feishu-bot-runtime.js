@@ -93,6 +93,7 @@ class FeishuBotRuntime {
     this.replyFlushInFlightByRunKey = new Map();
     this.replyFlushQueuedByRunKey = new Set();
     this.sentAttachmentDirectiveKeys = new Set();
+    this.planConfirmationKeys = new Set();
     this.latestTokenUsageByThreadId = new Map();
     this.toolItemIdsByRunKey = new Map();
     this.toolTraceByRunKey = new Map();

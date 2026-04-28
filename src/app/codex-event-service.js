@@ -1,6 +1,7 @@
 const codexMessageUtils = require("../infra/codex/message-utils");
 const { formatFailureText } = require("../shared/error-text");
 const attachmentDirectives = require("../domain/attachments/outbound-directive-service");
+const planRuntime = require("../domain/plan/plan-service");
 
 async function handleStopCommand(runtime, normalized) {
   const { bindingKey, workspaceRoot } = runtime.getBindingContext(normalized);
@@ -289,6 +290,12 @@ async function deliverToFeishu(runtime, event) {
       text: attachmentResult.text,
       state: "streaming",
       deferFlush: !runtime.config.feishuStreamingOutput,
+    });
+    await planRuntime.maybeSendPlanConfirmationCard(runtime, {
+      threadId: event.payload.threadId,
+      turnId: event.payload.turnId,
+      chatId: event.payload.chatId,
+      text: attachmentResult.text,
     });
     return;
   }

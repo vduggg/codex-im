@@ -111,6 +111,8 @@ function extractCardAction(data) {
     return {
       kind: value.kind,
       action: value.action || "",
+      threadId: value.threadId || "",
+      workspaceRoot: value.workspaceRoot || "",
     };
   }
   return null;
