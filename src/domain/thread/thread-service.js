@@ -26,14 +26,17 @@ async function resolveWorkspaceThreadState(runtime, {
   const threads = await refreshWorkspaceThreads(runtime, bindingKey, workspaceRoot, normalized);
   const selectedThreadId = runtime.resolveThreadIdForBinding(bindingKey, workspaceRoot);
   const binding = runtime.sessionStore.getBinding(bindingKey) || {};
-  const shouldAutoSelectThread = autoSelectThread && binding.threadScopedBinding !== true;
+  const activeProviderKey = typeof binding.activeProviderKey === "string" ? binding.activeProviderKey.trim() : "";
+  const currentProviderKey = runtime.getCodexProviderKey();
+  const providerChanged = activeProviderKey && currentProviderKey && activeProviderKey !== currentProviderKey;
+  const shouldAutoSelectThread = autoSelectThread && binding.threadScopedBinding !== true && !providerChanged;
   const threadId = selectedThreadId || (shouldAutoSelectThread ? (threads[0]?.id || "") : "");
   if (!selectedThreadId && threadId) {
     runtime.sessionStore.setThreadIdForWorkspace(
       bindingKey,
       workspaceRoot,
       threadId,
-      codexMessageUtils.buildBindingMetadata(normalized)
+      buildThreadBindingExtra(runtime, normalized)
     );
   }
   if (threadId) {
@@ -105,7 +108,7 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
 
     console.warn(`[codex-im] stale thread detected, recreating workspace thread: ${threadId}`);
     runtime.resumedThreadIds.delete(threadId);
-    runtime.sessionStore.clearThreadIdForWorkspace(bindingKey, workspaceRoot);
+    runtime.sessionStore.clearThreadIdForWorkspace(bindingKey, workspaceRoot, runtime.getCodexProviderKey());
     const recreatedThreadId = await createWorkspaceThread(runtime, {
       bindingKey,
       workspaceRoot,
@@ -186,7 +189,7 @@ async function createWorkspaceThread(runtime, { bindingKey, workspaceRoot, norma
     bindingKey,
     workspaceRoot,
     resolvedThreadId,
-    codexMessageUtils.buildBindingMetadata(normalized)
+    buildThreadBindingExtra(runtime, normalized)
   );
   runtime.resumedThreadIds.add(resolvedThreadId);
   runtime.setPendingThreadContext(resolvedThreadId, normalized);
@@ -256,10 +259,10 @@ async function handleSwitchCommand(runtime, normalized) {
 async function refreshWorkspaceThreads(runtime, bindingKey, workspaceRoot, normalized) {
   try {
     const threads = await listCodexThreadsForWorkspace(runtime, workspaceRoot);
-    const currentThreadId = runtime.sessionStore.getThreadIdForWorkspace(bindingKey, workspaceRoot);
+    const currentThreadId = runtime.resolveThreadIdForBinding(bindingKey, workspaceRoot);
     const shouldKeepCurrentThread = currentThreadId && runtime.resumedThreadIds.has(currentThreadId);
     if (currentThreadId && !shouldKeepCurrentThread && !threads.some((thread) => thread.id === currentThreadId)) {
-      runtime.sessionStore.clearThreadIdForWorkspace(bindingKey, workspaceRoot);
+      runtime.sessionStore.clearThreadIdForWorkspace(bindingKey, workspaceRoot, runtime.getCodexProviderKey());
     }
     return threads;
   } catch (error) {
@@ -359,7 +362,7 @@ async function switchThreadById(runtime, normalized, threadId, { replyToMessageI
     bindingKey,
     resolvedWorkspaceRoot,
     threadId,
-    codexMessageUtils.buildBindingMetadata(normalized)
+    buildThreadBindingExtra(runtime, normalized)
   );
   runtime.setThreadBindingKey(threadId, bindingKey);
   runtime.setThreadWorkspaceRoot(threadId, resolvedWorkspaceRoot);
@@ -376,6 +379,17 @@ function isSupportedThreadSourceKind(sourceKind) {
 function shouldRecreateThread(error) {
   const message = String(error?.message || "").toLowerCase();
   return message.includes("thread not found") || message.includes("unknown thread");
+}
+
+function buildThreadBindingExtra(runtime, normalized) {
+  const providerState = typeof runtime.getCodexProviderState === "function"
+    ? runtime.getCodexProviderState()
+    : null;
+  return {
+    ...codexMessageUtils.buildBindingMetadata(normalized),
+    providerKey: providerState?.key || "",
+    providerLabel: providerState?.label || "",
+  };
 }
 
 module.exports = {

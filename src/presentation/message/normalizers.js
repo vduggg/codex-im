@@ -338,6 +338,7 @@ function parseCommand(text) {
     model: ["model"],
     effort: ["effort"],
     profile: ["profile"],
+    provider: ["provider"],
     plan: ["plan"],
     memory: ["memory"],
     today: ["today"],
@@ -375,6 +376,9 @@ function parseCommand(text) {
   }
   if (matchesPrefixCommand(normalized, "profile")) {
     return "profile";
+  }
+  if (matchesPrefixCommand(normalized, "provider")) {
+    return "provider";
   }
   if (matchesPrefixCommand(normalized, "plan")) {
     return "plan";

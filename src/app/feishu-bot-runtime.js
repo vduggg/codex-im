@@ -54,6 +54,7 @@ const runtimeExtensions = require("./runtime-extensions");
 const eventsRuntime = require("./codex-event-service");
 const approvalPolicyRuntime = require("../domain/approval/approval-policy");
 const appDispatcher = require("./dispatcher");
+const { readCodexProviderState } = require("../infra/codex/provider-fingerprint");
 const { extractModelCatalogFromListResponse } = require("../shared/model-catalog");
 const { extractProfileValue } = require("../shared/command-parsing");
 const fs = require("fs");
@@ -286,6 +287,7 @@ class FeishuBotRuntime {
       senderBindingKey,
       inheritedWorkspaceRoot
     );
+    const provider = this.getCodexProviderState();
 
     this.sessionStore.setThreadIdForWorkspace(
       bindingKey,
@@ -298,6 +300,8 @@ class FeishuBotRuntime {
         senderId: normalized.senderId,
         inheritedFromBindingKey: senderBindingKey,
         threadScopedBinding: true,
+        providerKey: provider.key,
+        providerLabel: provider.label,
       }
     );
     if (inheritedParams.model || inheritedParams.effort) {
@@ -325,6 +329,38 @@ class FeishuBotRuntime {
 
   describeCodexAppServerProfile() {
     return this.codexAppServerProfile || "main";
+  }
+
+  getCodexProviderState() {
+    return readCodexProviderState({
+      appServerProfile: this.describeCodexAppServerProfile(),
+    });
+  }
+
+  getCodexProviderKey() {
+    return this.getCodexProviderState().key;
+  }
+
+  async handleProviderCommand(normalized) {
+    const { bindingKey, workspaceRoot } = this.getBindingContext(normalized);
+    const provider = this.getCodexProviderState();
+    const threadId = workspaceRoot ? this.resolveThreadIdForBinding(bindingKey, workspaceRoot) : "";
+    const binding = this.sessionStore.getBinding(bindingKey) || {};
+    const legacyThreadId = workspaceRoot
+      ? this.sessionStore.getThreadIdForWorkspace(bindingKey, workspaceRoot)
+      : "";
+    await this.sendInfoCardMessage({
+      chatId: normalized.chatId,
+      replyToMessageId: normalized.messageId,
+      text: [
+        `当前模型通道：${provider.label}`,
+        `provider key: \`${provider.key}\``,
+        workspaceRoot ? `项目：\`${workspaceRoot}\`` : "项目：未绑定",
+        threadId ? `当前通道线程：\`${threadId}\`` : "当前通道线程：未绑定，下一条消息会自动创建新线程",
+        legacyThreadId && legacyThreadId !== threadId ? `最近显示线程：\`${legacyThreadId}\`` : "",
+        binding.activeProviderLabel ? `上次活跃通道：${binding.activeProviderLabel}` : "",
+      ].filter(Boolean).join("\n"),
+    });
   }
 
   async switchCodexAppServerProfile(profileAlias) {

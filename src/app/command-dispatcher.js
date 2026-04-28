@@ -21,6 +21,7 @@ const TEXT_COMMAND_HANDLER_METHODS = {
   model: "handleModelCommand",
   effort: "handleEffortCommand",
   profile: "handleProfileCommand",
+  provider: "handleProviderCommand",
   plan: "handlePlanCommand",
   memory: "handleMemoryCommand",
   today: "handleTodayCommand",

@@ -991,6 +991,11 @@ function buildHelpCardText() {
       "按需切换飞书桥背后的 Codex app-server。",
     ],
     [
+      "**查看模型通道绑定**",
+      "`/codex provider`",
+      "查看当前官方/中转等模型通道指纹，以及该通道绑定的 Codex 线程。",
+    ],
+    [
       "**计划模式**",
       "`/codex plan`",
       "`/codex plan on`",

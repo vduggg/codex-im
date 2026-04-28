@@ -63,12 +63,17 @@ class SessionStore {
     });
   }
 
-  getThreadIdForWorkspace(bindingKey, workspaceRoot) {
+  getThreadIdForWorkspace(bindingKey, workspaceRoot, providerKey = "") {
     const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return "";
     }
-    return this.state.bindings[bindingKey]?.threadIdByWorkspaceRoot?.[normalizedWorkspaceRoot] || "";
+    const normalizedProviderKey = normalizeValue(providerKey);
+    const binding = this.state.bindings[bindingKey] || {};
+    if (normalizedProviderKey) {
+      return binding.providerThreadIdByWorkspaceRoot?.[normalizedWorkspaceRoot]?.[normalizedProviderKey] || "";
+    }
+    return binding.threadIdByWorkspaceRoot?.[normalizedWorkspaceRoot] || "";
   }
 
   setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId, extra = {}) {
@@ -77,35 +82,57 @@ class SessionStore {
       return this.getBinding(bindingKey);
     }
 
+    const { providerKey, providerLabel, ...bindingExtra } = extra || {};
+    const normalizedProviderKey = normalizeValue(providerKey);
+    const normalizedProviderLabel = normalizeValue(providerLabel);
     const current = this.getBinding(bindingKey) || {};
     const threadIdByWorkspaceRoot = {
       ...getThreadMap(current),
       [normalizedWorkspaceRoot]: threadId,
     };
+    const providerThreadIdByWorkspaceRoot = getProviderThreadMap(current);
+    if (normalizedProviderKey) {
+      providerThreadIdByWorkspaceRoot[normalizedWorkspaceRoot] = {
+        ...(providerThreadIdByWorkspaceRoot[normalizedWorkspaceRoot] || {}),
+        [normalizedProviderKey]: threadId,
+      };
+    }
 
     return this.updateBinding(bindingKey, {
       ...current,
-      ...extra,
+      ...bindingExtra,
       activeWorkspaceRoot: normalizedWorkspaceRoot,
+      activeProviderKey: normalizedProviderKey || normalizeValue(current.activeProviderKey),
+      activeProviderLabel: normalizedProviderLabel || normalizeValue(current.activeProviderLabel),
       threadIdByWorkspaceRoot,
+      providerThreadIdByWorkspaceRoot,
     });
   }
 
-  clearThreadIdForWorkspace(bindingKey, workspaceRoot) {
+  clearThreadIdForWorkspace(bindingKey, workspaceRoot, providerKey = "") {
     const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return this.getBinding(bindingKey);
     }
 
+    const normalizedProviderKey = normalizeValue(providerKey);
     const current = this.getBinding(bindingKey) || {};
     const threadIdByWorkspaceRoot = {
       ...getThreadMap(current),
       [normalizedWorkspaceRoot]: "",
     };
+    const providerThreadIdByWorkspaceRoot = getProviderThreadMap(current);
+    if (normalizedProviderKey && providerThreadIdByWorkspaceRoot[normalizedWorkspaceRoot]) {
+      providerThreadIdByWorkspaceRoot[normalizedWorkspaceRoot] = {
+        ...providerThreadIdByWorkspaceRoot[normalizedWorkspaceRoot],
+        [normalizedProviderKey]: "",
+      };
+    }
 
     return this.updateBinding(bindingKey, {
       ...current,
       threadIdByWorkspaceRoot,
+      providerThreadIdByWorkspaceRoot,
     });
   }
 
@@ -219,6 +246,7 @@ class SessionStore {
 
     const current = this.getBinding(bindingKey) || {};
     const threadIdByWorkspaceRoot = getThreadMap(current);
+    const providerThreadIdByWorkspaceRoot = getProviderThreadMap(current);
     const codexParamsByWorkspaceRoot = getCodexParamsMap(current);
     const hasWorkspaceEntry = Object.prototype.hasOwnProperty.call(
       threadIdByWorkspaceRoot,
@@ -230,6 +258,7 @@ class SessionStore {
     }
 
     delete threadIdByWorkspaceRoot[normalizedWorkspaceRoot];
+    delete providerThreadIdByWorkspaceRoot[normalizedWorkspaceRoot];
     delete codexParamsByWorkspaceRoot[normalizedWorkspaceRoot];
 
     const nextActiveWorkspaceRoot = activeWorkspaceRoot === normalizedWorkspaceRoot
@@ -240,6 +269,7 @@ class SessionStore {
       ...current,
       activeWorkspaceRoot: nextActiveWorkspaceRoot,
       codexParamsByWorkspaceRoot,
+      providerThreadIdByWorkspaceRoot,
       threadIdByWorkspaceRoot,
     });
   }
@@ -283,6 +313,17 @@ function createEmptyState() {
 
 function getThreadMap(binding) {
   return { ...(binding?.threadIdByWorkspaceRoot || {}) };
+}
+
+function getProviderThreadMap(binding) {
+  const raw = binding?.providerThreadIdByWorkspaceRoot || {};
+  const copy = {};
+  for (const [workspaceRoot, providerMap] of Object.entries(raw)) {
+    if (providerMap && typeof providerMap === "object" && !Array.isArray(providerMap)) {
+      copy[workspaceRoot] = { ...providerMap };
+    }
+  }
+  return copy;
 }
 
 function getCodexParamsMap(binding) {

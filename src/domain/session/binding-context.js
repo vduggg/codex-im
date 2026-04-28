@@ -9,7 +9,10 @@ function resolveWorkspaceRootForBinding(runtime, bindingKey) {
 }
 
 function resolveThreadIdForBinding(runtime, bindingKey, workspaceRoot) {
-  return runtime.sessionStore.getThreadIdForWorkspace(bindingKey, workspaceRoot);
+  const providerKey = typeof runtime.getCodexProviderKey === "function"
+    ? runtime.getCodexProviderKey()
+    : "";
+  return runtime.sessionStore.getThreadIdForWorkspace(bindingKey, workspaceRoot, providerKey);
 }
 
 function setThreadBindingKey(runtime, threadId, bindingKey) {

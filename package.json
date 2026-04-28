@@ -38,6 +38,7 @@
     "test:errors": "node ./scripts/test-codex-error-events.js",
     "test:media": "node ./scripts/test-media-fixtures.js",
     "test:plan": "node ./scripts/test-plan-mode.js",
+    "test:provider": "node ./scripts/test-provider-routing.js",
     "test:queue": "node ./scripts/test-message-queue.js",
     "smoke:feishu-media": "node ./scripts/feishu-media-smoke.js"
   },
