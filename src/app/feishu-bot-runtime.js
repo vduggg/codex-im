@@ -47,6 +47,7 @@ const runtimeCommands = require("./command-dispatcher");
 const approvalRuntime = require("../domain/approval/approval-service");
 const runtimeState = require("../domain/session/binding-context");
 const threadRuntime = require("../domain/thread/thread-service");
+const messageQueueRuntime = require("../domain/thread/message-queue");
 const workspaceRuntime = require("../domain/workspace/workspace-service");
 const runtimeExtensions = require("./runtime-extensions");
 const eventsRuntime = require("./codex-event-service");
@@ -96,6 +97,7 @@ class FeishuBotRuntime {
     this.assistantDeltaSeenByRunKey = new Map();
     this.pendingReactionByBindingKey = new Map();
     this.pendingReactionByThreadId = new Map();
+    this.messageQueueByThreadId = new Map();
     this.bindingKeyByThreadId = new Map();
     this.workspaceRootByThreadId = new Map();
     this.approvalAllowlistByWorkspaceRoot = new Map();
@@ -557,6 +559,10 @@ function attachRuntimeForwarders() {
     disposeReplyRunState,
     cleanupThreadRuntimeState: runtimeState.cleanupThreadRuntimeState,
     pruneRuntimeMapSizes: runtimeState.pruneRuntimeMapSizes,
+    clearThreadMessageQueue: messageQueueRuntime.clearThreadMessageQueue,
+    drainNextThreadMessage: messageQueueRuntime.drainNextThreadMessage,
+    enqueueThreadMessage: messageQueueRuntime.enqueueThreadMessage,
+    getThreadMessageQueueSize: messageQueueRuntime.getThreadMessageQueueSize,
   };
 
   for (const [methodName, fn] of Object.entries(runtimeFirstForwarders)) {

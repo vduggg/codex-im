@@ -20,18 +20,22 @@ async function handleStopCommand(runtime, normalized) {
       threadId,
       turnId,
     });
+    const clearedCount = runtime.clearThreadMessageQueue(threadId);
     runtime.cleanupThreadRuntimeState(threadId);
     await runtime.sendInfoCardMessage({
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
-      text: "已发送停止请求，并已清理飞书端运行状态。可以继续发新消息。",
+      text: clearedCount
+        ? `已发送停止请求，并清理飞书端运行状态；队列里的 ${clearedCount} 条消息也已取消。可以继续发新消息。`
+        : "已发送停止请求，并已清理飞书端运行状态。可以继续发新消息。",
     });
   } catch (error) {
+    const clearedCount = runtime.clearThreadMessageQueue(threadId);
     runtime.cleanupThreadRuntimeState(threadId);
     await runtime.sendInfoCardMessage({
       chatId: normalized.chatId,
       replyToMessageId: normalized.messageId,
-      text: `${formatFailureText("停止请求未确认", error)}\n\n我已先清理飞书端运行状态，你可以继续发消息；如果终端侧仍在跑，建议稍后再发一次 /codex stop。`,
+      text: `${formatFailureText("停止请求未确认", error)}\n\n我已先清理飞书端运行状态${clearedCount ? `，并取消队列里的 ${clearedCount} 条消息` : ""}。你可以继续发消息；如果终端侧仍在跑，建议稍后再发一次 /codex stop。`,
     });
   }
 }
@@ -87,6 +91,9 @@ function handleCodexMessage(runtime, message) {
         console.error(`[codex-im] failed to clear pending reaction: ${error.message}`);
       });
       runtime.cleanupThreadRuntimeState(threadId);
+      runtime.drainNextThreadMessage(threadId).catch((error) => {
+        console.error(`[codex-im] failed to drain queued Feishu message: ${error.message}`);
+      });
     });
 }
 
