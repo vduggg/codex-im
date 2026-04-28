@@ -274,11 +274,17 @@ function truncateInline(text, limit = 80) {
 
 async function deliverToFeishu(runtime, event) {
   if (event.type === "im.agent_reply") {
-    const attachmentResult = await attachmentDirectives.handleOutboundAttachmentDirectives(runtime, {
+    const planQuestionResult = await planRuntime.handlePlanQuestionDirectives(runtime, {
       threadId: event.payload.threadId,
       turnId: event.payload.turnId,
       chatId: event.payload.chatId,
       text: event.payload.text,
+    });
+    const attachmentResult = await attachmentDirectives.handleOutboundAttachmentDirectives(runtime, {
+      threadId: event.payload.threadId,
+      turnId: event.payload.turnId,
+      chatId: event.payload.chatId,
+      text: planQuestionResult.text,
     });
     if (!attachmentResult.text && attachmentResult.sent > 0) {
       return;

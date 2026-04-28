@@ -111,6 +111,8 @@ function extractCardAction(data) {
     return {
       kind: value.kind,
       action: value.action || "",
+      answer: value.answer || "",
+      question: value.question || "",
       threadId: value.threadId || "",
       workspaceRoot: value.workspaceRoot || "",
     };

@@ -9,6 +9,7 @@ async function main() {
   const runtime = {
     bindingKeyByThreadId: new Map([["thread-1", "binding-1"]]),
     planConfirmationKeys: new Set(),
+    planQuestionKeys: new Set(),
     workspaceRootByThreadId: new Map([["thread-1", "/tmp/workspace"]]),
     sessionStore: {
       getBinding: () => binding,
@@ -80,6 +81,32 @@ async function main() {
   const executePayload = sent.find((payload) => payload.executePayload)?.executePayload;
   assert.strictEqual(executePayload.threadId, "thread-1");
   assert.match(executePayload.normalized.text, /确认执行/);
+
+  const questionText = '需要你选一下\n[[yuan-feishu-plan-question:{"question":"测试范围选哪个？","options":["真实飞书","本地模拟"]}]]';
+  assert.strictEqual(plan.extractPlanQuestions(questionText)[0].question, "测试范围选哪个？");
+  const questionResult = await plan.handlePlanQuestionDirectives(runtime, {
+    threadId: "thread-1",
+    turnId: "turn-2",
+    chatId: "oc_test",
+    text: questionText,
+  });
+  assert.strictEqual(questionResult.sent, 1);
+  assert.strictEqual(questionResult.text, "需要你选一下");
+  const questionCard = sent.find((payload) => payload.card?.header?.title?.content === "计划需要补充");
+  assert.ok(questionCard);
+  const answerButton = questionCard.card.elements[1].actions[0];
+  assert.strictEqual(answerButton.value.action, "answer");
+  assert.strictEqual(answerButton.value.question, "测试范围选哪个？");
+
+  await plan.handlePlanCardAction(runtime, answerButton.value, {
+    chatId: "oc_test",
+    messageId: "om_answer",
+    workspaceId: "default",
+    senderId: "ou_test",
+  });
+  const answerPayload = sent.find((payload) => payload.executePayload?.normalized?.messageId === "om_answer")?.executePayload;
+  assert.match(answerPayload.normalized.text, /测试范围选哪个/);
+  assert.match(answerPayload.normalized.text, /真实飞书/);
   console.log("plan mode fixtures ok");
 }
 

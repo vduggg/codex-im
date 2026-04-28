@@ -1,5 +1,7 @@
 const { normalizeWorkspacePath } = require("../../shared/workspace-paths");
 
+const PLAN_QUESTION_RE = /\[\[yuan-feishu-plan-question:([\s\S]*?)\]\]/g;
+
 async function handlePlanCommand(runtime, normalized, action = null) {
   const context = await runtime.resolveWorkspaceContext(normalized, {
     replyToMessageId: normalized.messageId,
@@ -34,11 +36,57 @@ function handlePlanCardAction(runtime, action, normalized) {
       () => executeConfirmedPlan(runtime, action, normalized)
     );
   }
+  if (action.action === "answer") {
+    return runtime.queueCardActionWithFeedback(
+      normalized,
+      "正在提交计划补充...",
+      () => answerPlanQuestion(runtime, action, normalized)
+    );
+  }
   return runtime.queueCardActionWithFeedback(
     normalized,
     "正在切换计划模式...",
     () => runtime.handlePlanCommand(normalized, action)
   );
+}
+
+async function answerPlanQuestion(runtime, action, normalized) {
+  const threadId = normalizeIdentifier(action.threadId);
+  const workspaceRoot = normalizeWorkspacePath(
+    action.workspaceRoot
+      || runtime.resolveWorkspaceRootForThread(threadId)
+      || runtime.workspaceRootByThreadId.get(threadId)
+      || ""
+  );
+  const bindingKey = runtime.bindingKeyByThreadId.get(threadId)
+    || runtime.sessionStore.buildBindingKey(normalized);
+  if (!threadId || !workspaceRoot || !bindingKey) {
+    await runtime.sendInfoCardMessage({
+      chatId: normalized.chatId,
+      replyToMessageId: normalized.messageId,
+      text: "无法提交计划补充：没有找到对应线程或项目。",
+    });
+    return;
+  }
+  const answerMessage = {
+    ...normalized,
+    text: [
+      "Jiao 在飞书计划问答卡中选择/补充：",
+      `问题：${action.question || "未记录"}`,
+      `回答：${action.answer || "未记录"}`,
+      "",
+      "请基于这个回答继续计划模式；如果信息足够，请输出 <proposed_plan>。",
+    ].join("\n"),
+    command: "message",
+  };
+  runtime.setPendingBindingContext(bindingKey, answerMessage);
+  runtime.setPendingThreadContext(threadId, answerMessage);
+  await runtime.ensureThreadAndSendMessage({
+    bindingKey,
+    workspaceRoot,
+    normalized: answerMessage,
+    threadId,
+  });
 }
 
 async function executeConfirmedPlan(runtime, action, normalized) {
@@ -100,7 +148,7 @@ function buildMessageWithPlanMode(runtime, { bindingKey = "", workspaceRoot = ""
   }
   return [
     "<feishu-plan-mode>",
-    "[System note: Feishu Plan Mode is ON for this workspace. Do not execute code changes, shell commands with side effects, file edits, commits, uploads, or Obsidian writes unless Jiao explicitly turns plan mode off or says to execute. First clarify goal, success criteria, scope, risks, and implementation approach. Prefer a concise plan. If the plan is ready, wrap it in <proposed_plan>...</proposed_plan>.]",
+    "[System note: Feishu Plan Mode is ON for this workspace. Do not execute code changes, shell commands with side effects, file edits, commits, uploads, or Obsidian writes unless Jiao explicitly turns plan mode off or says to execute. First clarify goal, success criteria, scope, risks, and implementation approach. If you need Jiao to choose or supplement information, ask in natural language and also include one hidden directive on its own line: [[yuan-feishu-plan-question:{\"question\":\"...\",\"options\":[\"推荐选项\",\"另一个选项\"]}]]. The bridge will turn that directive into a Feishu question card. If the plan is ready, wrap it in <proposed_plan>...</proposed_plan>.]",
     "</feishu-plan-mode>",
     "",
     text,
@@ -183,6 +231,85 @@ async function maybeSendPlanConfirmationCard(runtime, { threadId = "", turnId = 
   return true;
 }
 
+async function handlePlanQuestionDirectives(runtime, { threadId = "", turnId = "", chatId = "", text = "" } = {}) {
+  const questions = extractPlanQuestions(text);
+  if (!threadId || !turnId || !chatId || !questions.length) {
+    return { text: stripPlanQuestionDirectives(text), sent: 0 };
+  }
+  const workspaceRoot = runtime.resolveWorkspaceRootForThread(threadId)
+    || runtime.workspaceRootByThreadId.get(threadId)
+    || "";
+  let sent = 0;
+  for (const [index, question] of questions.entries()) {
+    const key = `${threadId}:${turnId}:q${index}:${question.question}`;
+    if (runtime.planQuestionKeys.has(key)) {
+      continue;
+    }
+    runtime.planQuestionKeys.add(key);
+    await runtime.sendInteractiveCard({
+      chatId,
+      card: buildPlanQuestionCard({
+        threadId,
+        workspaceRoot,
+        question,
+      }),
+    });
+    sent += 1;
+  }
+  return { text: stripPlanQuestionDirectives(text), sent };
+}
+
+function buildPlanQuestionCard({ threadId, workspaceRoot, question }) {
+  const options = normalizeQuestionOptions(question.options);
+  const actions = options.map((option) => ({
+    tag: "button",
+    text: { tag: "plain_text", content: option.label },
+    type: option.recommended ? "primary" : "",
+    value: {
+      ...buildPlanActionValue("answer"),
+      threadId,
+      workspaceRoot,
+      question: question.question,
+      answer: option.label,
+    },
+  }));
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      title: { tag: "plain_text", content: "计划需要补充" },
+      template: "blue",
+    },
+    elements: [
+      {
+        tag: "div",
+        text: {
+          tag: "lark_md",
+          content: [
+            question.question,
+            question.description ? `\n${question.description}` : "",
+            "",
+            "点一个选项后，我会继续修正计划。",
+          ].filter(Boolean).join("\n"),
+        },
+      },
+      {
+        tag: "action",
+        actions: actions.length ? actions : [
+          {
+            tag: "button",
+            text: { tag: "plain_text", content: "我直接补充文字" },
+            value: {
+              ...buildPlanActionValue("on"),
+              threadId,
+              workspaceRoot,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function buildPlanConfirmationCard({ threadId, workspaceRoot }) {
   return {
     config: { wide_screen_mode: true },
@@ -248,6 +375,54 @@ function buildPlanActionValue(action) {
   };
 }
 
+function extractPlanQuestions(text) {
+  const result = [];
+  const source = String(text || "");
+  let match;
+  while ((match = PLAN_QUESTION_RE.exec(source))) {
+    const question = parsePlanQuestion(match[1]);
+    if (question?.question) {
+      result.push(question);
+    }
+  }
+  return result;
+}
+
+function stripPlanQuestionDirectives(text) {
+  return String(text || "").replace(PLAN_QUESTION_RE, "").trim();
+}
+
+function parsePlanQuestion(rawJson) {
+  try {
+    const parsed = JSON.parse(String(rawJson || "").trim());
+    return {
+      question: normalizeIdentifier(parsed.question),
+      description: normalizeIdentifier(parsed.description),
+      options: Array.isArray(parsed.options) ? parsed.options : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeQuestionOptions(options) {
+  return options
+    .map((option, index) => {
+      if (typeof option === "string") {
+        return {
+          label: option.trim(),
+          recommended: index === 0,
+        };
+      }
+      return {
+        label: normalizeIdentifier(option?.label),
+        recommended: Boolean(option?.recommended) || index === 0,
+      };
+    })
+    .filter((option) => option.label)
+    .slice(0, 4);
+}
+
 function parsePlanCommand(text) {
   const normalized = String(text || "").trim().toLowerCase();
   if (/^\/codex\s+plan\s+(on|open|enable|开启|打开)$/.test(normalized)) {
@@ -270,8 +445,11 @@ function normalizeIdentifier(value) {
 
 module.exports = {
   buildMessageWithPlanMode,
+  extractPlanQuestions,
   getPlanMode,
   handlePlanCardAction,
   handlePlanCommand,
+  handlePlanQuestionDirectives,
   maybeSendPlanConfirmationCard,
+  stripPlanQuestionDirectives,
 };
