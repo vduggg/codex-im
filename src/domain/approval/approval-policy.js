@@ -6,6 +6,7 @@ function rememberApprovalPrefixForWorkspace(runtime, workspaceRoot, commandToken
     return;
   }
 
+  runtime.sessionStore.setApprovalCommandAutoAllowForWorkspace(workspaceRoot, true);
   runtime.sessionStore.rememberApprovalCommandPrefixForWorkspace(workspaceRoot, normalizedTokens);
   runtime.approvalAllowlistByWorkspaceRoot.set(
     workspaceRoot,
@@ -16,6 +17,12 @@ function rememberApprovalPrefixForWorkspace(runtime, workspaceRoot, commandToken
 function shouldAutoApproveRequest(runtime, workspaceRoot, approval) {
   if (!workspaceRoot || !approval) {
     return false;
+  }
+  if (!codexMessageUtils.isCommandApprovalMethod(approval.method)) {
+    return false;
+  }
+  if (runtime.sessionStore.getApprovalCommandAutoAllowForWorkspace(workspaceRoot)) {
+    return true;
   }
   const cachedAllowlist = runtime.approvalAllowlistByWorkspaceRoot.get(workspaceRoot) || [];
   const allowlist = cachedAllowlist.length

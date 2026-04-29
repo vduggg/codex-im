@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="Before realtime process routing">
+  <rect width="960" height="540" rx="24" fill="#f7f8fb"/>
+  <text x="48" y="64" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" font-weight="700" fill="#1f2328">Before: process text jumped through the answer body</text>
+  <rect x="56" y="112" width="848" height="128" rx="14" fill="#ffffff" stroke="#d8dee4" stroke-width="2"/>
+  <text x="88" y="158" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" font-weight="700" fill="#57606a">已处理 85s</text>
+  <text x="88" y="200" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" fill="#57606a">Tools and summary were filled later</text>
+  <rect x="56" y="288" width="848" height="160" rx="14" fill="#ffffff" stroke="#d8dee4" stroke-width="2"/>
+  <text x="88" y="336" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" fill="#24292f">Process sentence appears here...</text>
+  <text x="88" y="384" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" fill="#cf222e">then disappears when the final snapshot arrives</text>
+  <path d="M480 248v34" stroke="#8c959f" stroke-width="4" stroke-linecap="round"/>
+  <path d="M468 270l12 14 12-14" fill="none" stroke="#8c959f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

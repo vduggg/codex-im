@@ -99,6 +99,7 @@ class FeishuBotRuntime {
     this.latestTokenUsageByThreadId = new Map();
     this.toolItemIdsByRunKey = new Map();
     this.toolTraceByRunKey = new Map();
+    this.memoryPreflightByThreadId = new Map();
     this.assistantDeltaSeenByRunKey = new Map();
     this.pendingReactionByBindingKey = new Map();
     this.pendingReactionByThreadId = new Map();

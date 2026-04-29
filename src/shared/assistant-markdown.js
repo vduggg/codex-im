@@ -4,12 +4,14 @@ const READABLE_PARAGRAPH_TARGET_CHARS = 140;
 const READABLE_PARAGRAPH_MAX_CHARS = 220;
 const DANGEROUS_HTML_TAG_RE = /<\/?(script|style|iframe|object|embed|meta|link)[^>]*>/gi;
 const DANGEROUS_LINK_RE = /(\]\()\s*(javascript:|data:text\/html)[^)]+(\))/gi;
+const THINK_TAG_RE = /<\/?think>/gi;
 
 function sanitizeAssistantMarkdown(text, options = {}) {
   const preserveHeadings = Boolean(options.preserveHeadings);
   let normalized = String(text || "")
     .replace(/\r\n/g, "\n")
     .replace(/\u0000/g, "")
+    .replace(THINK_TAG_RE, "")
     .replace(DANGEROUS_HTML_TAG_RE, "")
     .replace(DANGEROUS_LINK_RE, "$1about:blank$3")
     .replace(/\n{3,}/g, "\n\n");
@@ -35,6 +37,42 @@ function sanitizeAssistantMarkdown(text, options = {}) {
 function formatCardKitAssistantMarkdown(text) {
   const sanitized = sanitizeAssistantMarkdown(text, { preserveHeadings: true });
   return optimizeCardKitMarkdown(sanitized);
+}
+
+function splitAssistantReplyForDisplay(text) {
+  const normalized = sanitizeAssistantMarkdown(text, { preserveHeadings: true });
+  const marker = findFinalAnswerMarker(normalized);
+  if (marker <= 0) {
+    return {
+      answerText: normalized,
+      preAnswerText: "",
+    };
+  }
+
+  const preAnswerText = normalized.slice(0, marker).trim();
+  const answerText = normalized.slice(marker).trim();
+  if (!answerText || answerText.length < 16) {
+    return {
+      answerText: normalized,
+      preAnswerText: "",
+    };
+  }
+  return {
+    answerText,
+    preAnswerText,
+  };
+}
+
+function findFinalAnswerMarker(text) {
+  const normalized = String(text || "");
+  const markerRe = /(?:^|\n{2,})(Jiao[，,]\s*(?:弄好了|好了|搞定了|处理好了|刚才|确实|文档|我把|我已|我已经|这次|现在)|(?:可以实现|能实现|答案是)[，,。；;\s])/g;
+  let lastIndex = -1;
+  let match;
+  while ((match = markerRe.exec(normalized)) !== null) {
+    const prefixLength = match[0].length - match[1].length;
+    lastIndex = match.index + prefixLength;
+  }
+  return lastIndex;
 }
 
 function buildCardKitAssistantElements(content, options = {}) {
@@ -352,4 +390,5 @@ module.exports = {
   buildCardKitAssistantElements,
   formatCardKitAssistantMarkdown,
   sanitizeAssistantMarkdown,
+  splitAssistantReplyForDisplay,
 };

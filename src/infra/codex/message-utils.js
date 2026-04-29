@@ -32,9 +32,6 @@ function mapCodexMessageToImEvent(message, options = {}) {
   const suppressCompletedAssistantText = Boolean(options.suppressCompletedAssistantText);
 
   if (isAssistantMessageMethod(method, params)) {
-    if (suppressCompletedAssistantText && method === "item/completed") {
-      return null;
-    }
     const text = extractAssistantText(method, params);
     if (!text) {
       return null;
@@ -45,6 +42,10 @@ function mapCodexMessageToImEvent(message, options = {}) {
         threadId,
         turnId,
         text,
+        mode: method === "item/completed"
+          ? "completed_snapshot"
+          : "delta",
+        suppressStreamingDuplicate: suppressCompletedAssistantText && method === "item/completed",
       },
     };
   }

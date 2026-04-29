@@ -277,18 +277,23 @@ function truncateInline(text, limit = 80) {
 
 async function deliverToFeishu(runtime, event) {
   if (event.type === "im.agent_reply") {
-    const planQuestionResult = await planRuntime.handlePlanQuestionDirectives(runtime, {
-      threadId: event.payload.threadId,
-      turnId: event.payload.turnId,
-      chatId: event.payload.chatId,
-      text: event.payload.text,
-    });
-    const attachmentResult = await attachmentDirectives.handleOutboundAttachmentDirectives(runtime, {
-      threadId: event.payload.threadId,
-      turnId: event.payload.turnId,
-      chatId: event.payload.chatId,
-      text: planQuestionResult.text,
-    });
+    const shouldHandleDirectives = !event.payload.suppressStreamingDuplicate;
+    const planQuestionResult = shouldHandleDirectives
+      ? await planRuntime.handlePlanQuestionDirectives(runtime, {
+        threadId: event.payload.threadId,
+        turnId: event.payload.turnId,
+        chatId: event.payload.chatId,
+        text: event.payload.text,
+      })
+      : { text: event.payload.text };
+    const attachmentResult = shouldHandleDirectives
+      ? await attachmentDirectives.handleOutboundAttachmentDirectives(runtime, {
+        threadId: event.payload.threadId,
+        turnId: event.payload.turnId,
+        chatId: event.payload.chatId,
+        text: planQuestionResult.text,
+      })
+      : { text: planQuestionResult.text, sent: 0 };
     if (!attachmentResult.text && attachmentResult.sent > 0) {
       return;
     }
@@ -297,15 +302,18 @@ async function deliverToFeishu(runtime, event) {
       turnId: event.payload.turnId,
       chatId: event.payload.chatId,
       text: attachmentResult.text,
+      mode: event.payload.mode || "delta",
       state: "streaming",
       deferFlush: !runtime.config.feishuStreamingOutput,
     });
-    await planRuntime.maybeSendPlanConfirmationCard(runtime, {
-      threadId: event.payload.threadId,
-      turnId: event.payload.turnId,
-      chatId: event.payload.chatId,
-      text: attachmentResult.text,
-    });
+    if (shouldHandleDirectives) {
+      await planRuntime.maybeSendPlanConfirmationCard(runtime, {
+        threadId: event.payload.threadId,
+        turnId: event.payload.turnId,
+        chatId: event.payload.chatId,
+        text: attachmentResult.text,
+      });
+    }
     return;
   }
 

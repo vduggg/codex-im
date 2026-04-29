@@ -1,5 +1,14 @@
 const codexMessageUtils = require("../../infra/codex/message-utils");
 
+const RICH_TEXT_MESSAGE_TYPES = new Set([
+  "interactive",
+  "card",
+  "share_chat",
+  "share_user",
+  "merge_forward",
+  "forward",
+]);
+
 function normalizeFeishuTextEvent(event, config) {
   const message = event?.message || {};
   const sender = event?.sender || {};
@@ -32,11 +41,13 @@ function normalizeFeishuNonTextEvent(message, sender, config) {
   }
   const attachments = extractFeishuMessageAttachments(messageType, message.content);
   const text = parseFeishuNonTextMessageText(messageType, message.content);
-  const command = attachments.some((attachment) => attachment?.kind === "image")
+  const command = text
+    ? parseCommand(text)
+    : attachments.some((attachment) => attachment?.kind === "image")
     ? "image_message"
     : attachments.length
       ? "attachment_message"
-    : "unsupported_message";
+      : "unsupported_message";
   return {
     provider: "feishu",
     workspaceId: config.defaultWorkspaceId,
@@ -245,11 +256,135 @@ function extractFeishuMessageAttachments(messageType, rawContent) {
 }
 
 function parseFeishuNonTextMessageText(messageType, rawContent) {
-  if (messageType !== "post") {
-    return "";
-  }
   const parsed = parseFeishuMessageContent(rawContent);
+  if (messageType === "post") {
+    return extractPostPlainText(parsed).trim();
+  }
+  if (RICH_TEXT_MESSAGE_TYPES.has(messageType)) {
+    return extractRichMessageText(parsed).trim();
+  }
+  return "";
+}
+
+function extractRichMessageText(parsed) {
+  const fragments = [];
+  collectRichTextFragments(parsed, fragments, new Set());
+  return compactRichTextFragments(fragments);
+}
+
+function collectRichTextFragments(value, fragments, seen) {
+  if (!value) {
+    return;
+  }
+  if (typeof value === "string") {
+    const parsed = parseMaybeJson(value);
+    if (parsed && parsed !== value) {
+      collectRichTextFragments(parsed, fragments, seen);
+      return;
+    }
+    const clean = value.trim();
+    if (clean && !looksLikeOpaqueResourceValue(clean)) {
+      fragments.push(clean);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectRichTextFragments(item, fragments, seen);
+    }
+    return;
+  }
+  if (typeof value !== "object" || seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+
+  const tag = normalizeIdentifier(value.tag).toLowerCase();
+  const candidateKeys = tag === "markdown"
+    ? ["content", "text", "title"]
+    : ["text", "content", "title", "subtitle", "desc", "description"];
+  for (const key of candidateKeys) {
+    const item = value[key];
+    if (typeof item === "string" && item.trim() && !looksLikeOpaqueResourceValue(item)) {
+      fragments.push(item.trim());
+    }
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (["url", "href", "image_key", "imageKey", "file_key", "fileKey", "open_id", "openId"].includes(key)) {
+      continue;
+    }
+    if (child && typeof child === "object") {
+      collectRichTextFragments(child, fragments, seen);
+    }
+  }
+}
+
+function parseMaybeJson(value) {
+  const clean = String(value || "").trim();
+  if (!(clean.startsWith("{") || clean.startsWith("["))) {
+    return null;
+  }
+  try {
+    return JSON.parse(clean);
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeOpaqueResourceValue(value) {
+  const clean = String(value || "").trim();
+  return (
+    /^img_[A-Za-z0-9_-]{8,}$/.test(clean)
+    || /^file_[A-Za-z0-9_-]{8,}$/.test(clean)
+    || /^om_[A-Za-z0-9_-]{8,}$/.test(clean)
+  );
+}
+
+function compactRichTextFragments(fragments) {
+  const result = [];
+  for (const fragment of fragments) {
+    const clean = String(fragment || "").replace(/\n{3,}/g, "\n\n").trim();
+    if (!clean) {
+      continue;
+    }
+    if (result.some((existing) => existing === clean || existing.includes(clean))) {
+      continue;
+    }
+    result.push(clean);
+  }
+  return result.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+function extractPostPlainText(parsed) {
+  const content = findPostContentRows(parsed);
+  if (Array.isArray(content)) {
+    const lines = content
+      .map((row) => extractPostText(row).trimEnd())
+      .filter((line) => line.trim());
+    if (lines.length) {
+      return lines.join("\n").replace(/\n{3,}/g, "\n\n");
+    }
+  }
   return extractPostText(parsed).trim();
+}
+
+function findPostContentRows(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  if (Array.isArray(value?.content)) {
+    return value.content;
+  }
+  if (value.post && typeof value.post === "object") {
+    for (const localeValue of Object.values(value.post)) {
+      const rows = findPostContentRows(localeValue);
+      if (rows) {
+        return rows;
+      }
+    }
+  }
+  return null;
 }
 
 function extractPostImageKeys(value, result = []) {

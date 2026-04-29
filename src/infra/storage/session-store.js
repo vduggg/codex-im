@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const { normalizeModelCatalog } = require("../../shared/model-catalog");
 
+const DEFAULT_APPROVAL_AUTO_ALLOW_TTL_MS = 12 * 60 * 60 * 1000;
+
 class SessionStore {
   constructor({ filePath }) {
     this.filePath = filePath;
@@ -25,6 +27,7 @@ class SessionStore {
           ...parsed,
           bindings: parsed.bindings || {},
           approvalCommandAllowlistByWorkspaceRoot: parsed.approvalCommandAllowlistByWorkspaceRoot || {},
+          approvalCommandAutoAllowByWorkspaceRoot: parsed.approvalCommandAutoAllowByWorkspaceRoot || {},
           availableModelCatalog: parsed.availableModelCatalog || {
             models: [],
             updatedAt: "",
@@ -184,6 +187,47 @@ class SessionStore {
     return normalizeCommandAllowlist(allowlist);
   }
 
+  getApprovalCommandAutoAllowForWorkspace(workspaceRoot) {
+    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    if (!normalizedWorkspaceRoot) {
+      return false;
+    }
+    const raw = this.state.approvalCommandAutoAllowByWorkspaceRoot?.[normalizedWorkspaceRoot];
+    if (raw === true) {
+      return true;
+    }
+    if (!raw || typeof raw !== "object" || raw.enabled !== true) {
+      return false;
+    }
+    const expiresAt = Date.parse(raw.expiresAt || "");
+    return Number.isNaN(expiresAt) || expiresAt > Date.now();
+  }
+
+  setApprovalCommandAutoAllowForWorkspace(workspaceRoot, enabled = true) {
+    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    if (!normalizedWorkspaceRoot) {
+      return null;
+    }
+
+    const now = new Date();
+    this.state.approvalCommandAutoAllowByWorkspaceRoot = {
+      ...(this.state.approvalCommandAutoAllowByWorkspaceRoot || {}),
+      [normalizedWorkspaceRoot]: enabled === true
+        ? {
+          enabled: true,
+          updatedAt: now.toISOString(),
+          expiresAt: new Date(now.getTime() + DEFAULT_APPROVAL_AUTO_ALLOW_TTL_MS).toISOString(),
+        }
+        : {
+          enabled: false,
+          updatedAt: now.toISOString(),
+          expiresAt: "",
+        },
+    };
+    this.save();
+    return this.state.approvalCommandAutoAllowByWorkspaceRoot[normalizedWorkspaceRoot];
+  }
+
   getAvailableModelCatalog() {
     const raw = this.state.availableModelCatalog;
     if (!raw || typeof raw !== "object") {
@@ -304,6 +348,7 @@ function createEmptyState() {
   return {
     bindings: {},
     approvalCommandAllowlistByWorkspaceRoot: {},
+    approvalCommandAutoAllowByWorkspaceRoot: {},
     availableModelCatalog: {
       models: [],
       updatedAt: "",

@@ -1,6 +1,6 @@
 {
   "name": "yuan-feishu",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "description": "Yuan private Codex-Feishu bridge",
   "author": "Jiao + Yuan",
   "entry": "README.md"

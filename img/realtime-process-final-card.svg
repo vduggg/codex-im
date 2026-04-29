@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="Final Feishu card layout">
+  <rect width="960" height="540" rx="24" fill="#f7f8fb"/>
+  <text x="48" y="64" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" font-weight="700" fill="#1f2328">Final Feishu card layout</text>
+  <rect x="72" y="110" width="816" height="184" rx="16" fill="#ffffff" stroke="#d8dee4" stroke-width="2"/>
+  <text x="104" y="154" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="25" font-weight="700" fill="#57606a">已处理 1m 16s</text>
+  <text x="104" y="198" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" fill="#24292f">公开过程文字实时追加</text>
+  <text x="104" y="232" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" fill="#24292f">记忆预检 / 工具调用 / 文件读取 / 命令执行</text>
+  <text x="104" y="266" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" fill="#57606a">完成后自动收起，保留可展开记录</text>
+  <rect x="72" y="340" width="816" height="124" rx="16" fill="#ffffff" stroke="#d8dee4" stroke-width="2"/>
+  <text x="104" y="384" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" font-weight="700" fill="#24292f">正文区</text>
+  <text x="104" y="426" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" fill="#57606a">正式答案开始后流式输出；最终 snapshot 只做校准</text>
+</svg>

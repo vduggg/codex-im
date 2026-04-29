@@ -85,7 +85,7 @@ function buildApprovalResultText({ decision, scope, method }) {
     return "已拒绝本次请求。";
   }
   if (scope === "workspace" && codexMessageUtils.isCommandApprovalMethod(method)) {
-    return "已自动允许该命令，后续同工作区下相同前缀命令将自动放行。";
+    return "已自动允许当前项目的命令执行，后续 12 小时内同工作区下的 Codex 命令授权会自动放行。";
   }
   return "已允许本次请求。";
 }

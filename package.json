@@ -1,6 +1,6 @@
 {
   "name": "yuan-feishu",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Private Yuan Feishu bridge for local Codex.",
   "license": "MIT",
   "type": "commonjs",
@@ -14,8 +14,13 @@
     "remote"
   ],
   "files": [
+    ".codex-plugin",
     "bin",
+    "docs",
+    "img",
     "scripts",
+    "!scripts/__pycache__",
+    "!scripts/*.before-*",
     "src",
     "README.md",
     ".env.example"
@@ -39,6 +44,8 @@
     "test:media": "node ./scripts/test-media-fixtures.js",
     "test:plan": "node ./scripts/test-plan-mode.js",
     "test:provider": "node ./scripts/test-provider-routing.js",
+    "test:approval": "node ./scripts/test-approval-policy.js",
+    "test:card-content": "node ./scripts/test-card-reply-content.js",
     "test:queue": "node ./scripts/test-message-queue.js",
     "smoke:feishu-media": "node ./scripts/feishu-media-smoke.js"
   },

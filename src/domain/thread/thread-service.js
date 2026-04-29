@@ -154,13 +154,33 @@ async function buildMessageWithMemoryPreflightSafely(args) {
   });
   try {
     const buildMessage = args.runtime?.extensions?.memoryBridge?.buildMessageWithMemoryPreflight;
-    return typeof buildMessage === "function"
+    const textWithMemory = typeof buildMessage === "function"
       ? await buildMessage({ ...args, text: textWithCapabilities })
       : textWithCapabilities;
+    recordMemoryPreflightTrace(args.runtime, {
+      threadId: args.threadId,
+      textWithCapabilities,
+      textWithMemory,
+    });
+    return textWithMemory;
   } catch (error) {
     console.warn(`[codex-im] memory preflight skipped: ${error.message}`);
     return textWithCapabilities;
   }
+}
+
+function recordMemoryPreflightTrace(runtime, { threadId, textWithCapabilities, textWithMemory } = {}) {
+  if (!runtime?.memoryPreflightByThreadId || !threadId) {
+    return;
+  }
+  if (String(textWithMemory || "") === String(textWithCapabilities || "")) {
+    runtime.memoryPreflightByThreadId.delete(threadId);
+    return;
+  }
+  runtime.memoryPreflightByThreadId.set(
+    threadId,
+    "已挂载共同记忆上下文：Codex Memory Compiler、当天每日桥接、最近 TaskNotes 和 Obsidian Recall。"
+  );
 }
 
 function buildMessageWithBridgeCapabilities(text) {

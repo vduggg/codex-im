@@ -99,7 +99,7 @@ function buildApprovalCard(approval) {
         },
         {
           tag: "markdown",
-          content: "`自动允许` 对当前项目生效，相同命令自动允许，重启后仍保留。",
+          content: "`自动允许` 对当前项目的命令执行生效，后续 12 小时内 Codex shell 命令会自动放行，重启后仍保留到过期。",
           text_size: "notation",
         },
       ],
@@ -165,6 +165,10 @@ function buildAssistantReplyCard({ text, state, incomingText = "", elapsed = "",
       : normalizedState === "failed"
         ? "我这次没把它收稳，所以先停在这里。"
         : "我已经把这次回复收好了。";
+  const processText = [
+    resolvedThinkingText,
+    resolvedToolText ? `**执行记录**\n${resolvedToolText}` : "",
+  ].filter(Boolean).join("\n\n");
   const footer = buildAssistantReplyFooter({
     status: normalizedState === "failed" ? "未完成" : normalizedState === "completed" ? "已完成" : "正在回复",
     elapsed,
@@ -200,7 +204,7 @@ function buildAssistantReplyCard({ text, state, incomingText = "", elapsed = "",
           header: {
             title: {
               tag: "plain_text",
-              content: "🔧 工具执行",
+              content: buildAssistantReplyProcessTitle(normalizedState, elapsed),
             },
             icon: {
               tag: "standard_icon",
@@ -215,33 +219,7 @@ function buildAssistantReplyCard({ text, state, incomingText = "", elapsed = "",
           elements: [
             {
               tag: "markdown",
-              content: resolvedToolText,
-              text_size: "notation",
-            },
-          ],
-        },
-        {
-          tag: "collapsible_panel",
-          expanded: false,
-          header: {
-            title: {
-              tag: "plain_text",
-              content: normalizedState === "streaming" ? "💭 正在想" : "💭 思考完成",
-            },
-            icon: {
-              tag: "standard_icon",
-              token: "down-small-ccm_outlined",
-              size: "16px 16px",
-            },
-            icon_position: "follow_text",
-            icon_expanded_angle: -180,
-          },
-          border: { color: "grey", corner_radius: "5px" },
-          padding: "8px 8px 8px 8px",
-          elements: [
-            {
-              tag: "markdown",
-              content: resolvedThinkingText,
+              content: processText,
               text_size: "notation",
             },
           ],
@@ -261,6 +239,17 @@ function buildAssistantReplyCard({ text, state, incomingText = "", elapsed = "",
       ],
     },
   };
+}
+
+function buildAssistantReplyProcessTitle(state, elapsed = "") {
+  const timeText = elapsed || "刚刚";
+  if (state === "retrying") {
+    return `重连中 · 已处理 ${timeText}`;
+  }
+  if (state === "failed") {
+    return `处理失败 · 已处理 ${timeText}`;
+  }
+  return `已处理 ${timeText}`;
 }
 
 function buildAssistantReplyIntro(incomingText) {

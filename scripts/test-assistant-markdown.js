@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   buildCardKitAssistantElements,
   formatCardKitAssistantMarkdown,
+  splitAssistantReplyForDisplay,
 } = require("../src/shared/assistant-markdown");
 
 function testLongChineseParagraphSplits() {
@@ -89,8 +90,54 @@ function testCardKitAssistantElementsSplitRichBlocks() {
   assert.ok(elements.some((element) => element.tag === "markdown" && element.content.includes("```python")));
 }
 
+function testFinalAnswerIsSeparatedFromPreAnswerProcess() {
+  const input = [
+    "Jiao，我先去定位刚才那份“官方重置时间”文档，然后把标题改成更适合长期追踪的名字。",
+    "",
+    "我找到了目标页：`08_agent_memory_AI可读/32_用量统计/Codex官方配额重置观察.md`。",
+    "",
+    "这次会改 Vault 里的文件，所以我需要一次授权写入。",
+    "",
+    "Jiao，弄好了。",
+    "",
+    "我把文档改名成了：",
+    "",
+    "`08_agent_memory_AI可读/32_用量统计/Codex 官方渠道使用记录.md`",
+    "",
+    "里面已经补上：",
+    "",
+    "- `2026-04-28 14:00 左右`：周限额和每 5 小时限额都是 100%",
+    "- `2026-04-28 17:13`：开始切换到 OpenAI/Codex 官方渠道",
+  ].join("\n");
+
+  const output = splitAssistantReplyForDisplay(input);
+  assert.match(output.answerText, /^Jiao，弄好了。/);
+  assert.doesNotMatch(output.answerText, /我先去定位/);
+  assert.match(output.answerText, /- `2026-04-28 14:00 左右`/);
+  assert.match(output.preAnswerText, /我先去定位/);
+}
+
+function testFinalAnswerCanStartWithApologyOrDirectConclusion() {
+  const input = [
+    "文档已经建好了。现在我补一条每日桥接指针，这样明天其他入口能直接找到实验记录，不用再翻聊天。",
+    "",
+    "Jiao，刚才确实拖住了，我已经直接建好了。",
+    "",
+    "**已创建文档：**",
+    "",
+    "`04_projects_项目/AI工具停用实验记录.md`",
+  ].join("\n");
+
+  const output = splitAssistantReplyForDisplay(input);
+  assert.match(output.answerText, /^Jiao，刚才确实拖住了/);
+  assert.doesNotMatch(output.answerText, /每日桥接指针/);
+  assert.match(output.preAnswerText, /每日桥接指针/);
+}
+
 testLongChineseParagraphSplits();
 testStructuredMarkdownIsPreserved();
 testDenseReplyBecomesScannableMarkdown();
 testCardKitAssistantElementsSplitRichBlocks();
+testFinalAnswerIsSeparatedFromPreAnswerProcess();
+testFinalAnswerCanStartWithApologyOrDirectConclusion();
 console.log("assistant markdown formatting tests passed");
