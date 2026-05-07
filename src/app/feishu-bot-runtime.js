@@ -83,6 +83,10 @@ class FeishuBotRuntime {
     this.inFlightApprovalRequestKeys = new Set();
     this.resumedThreadIds = new Set();
     this.codex.onMessage((message) => appDispatcher.onCodexMessage(this, message));
+    this.codex.onTransportClosed((error) => {
+      console.error(`[codex-im] fatal codex transport failure: ${error.message}`);
+      setTimeout(() => process.exit(1), 0);
+    });
   }
 
   async start() {

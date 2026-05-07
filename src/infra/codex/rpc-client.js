@@ -24,6 +24,8 @@ class CodexRpcClient {
     this.pending = new Map();
     this.isReady = false;
     this.messageListeners = new Set();
+    this.transportCloseListeners = new Set();
+    this.transportCloseError = null;
   }
 
   async connect() {
@@ -71,7 +73,9 @@ class CodexRpcClient {
     this.child = child;
 
     child.on("error", (error) => {
-      this.isReady = false;
+      this.handleTransportClosed(
+        new Error(`Failed to spawn Codex app-server via ${selectedCommand || this.codexCommand}: ${error.message}`)
+      );
       console.error(`[codex-im] failed to spawn Codex app-server via ${selectedCommand || this.codexCommand}: ${error.message}`);
     });
 
@@ -96,8 +100,11 @@ class CodexRpcClient {
     });
 
     child.on("close", (code) => {
-      this.isReady = false;
-      console.error(`[codex-im] codex app-server exited with code ${code}`);
+      const message = code == null
+        ? "Codex app-server exited"
+        : `Codex app-server exited with code ${code}`;
+      this.handleTransportClosed(new Error(message));
+      console.error(`[codex-im] ${message}`);
     });
   }
 
@@ -107,7 +114,10 @@ class CodexRpcClient {
       this.socket = socket;
 
       socket.on("open", () => resolve());
-      socket.on("error", (error) => reject(error));
+      socket.on("error", (error) => {
+        this.handleTransportClosed(new Error(`Codex websocket error: ${error.message}`));
+        reject(error);
+      });
       socket.on("message", (chunk) => {
         const message = typeof chunk === "string" ? chunk : chunk.toString("utf8");
         if (message.trim()) {
@@ -115,7 +125,7 @@ class CodexRpcClient {
         }
       });
       socket.on("close", () => {
-        this.isReady = false;
+        this.handleTransportClosed(new Error("Codex websocket closed"));
       });
     });
   }
@@ -123,6 +133,11 @@ class CodexRpcClient {
   onMessage(listener) {
     this.messageListeners.add(listener);
     return () => this.messageListeners.delete(listener);
+  }
+
+  onTransportClosed(listener) {
+    this.transportCloseListeners.add(listener);
+    return () => this.transportCloseListeners.delete(listener);
   }
 
   async initialize() {
@@ -227,9 +242,27 @@ class CodexRpcClient {
     }
 
     if (!this.child || !this.child.stdin.writable) {
-      throw new Error("Codex process stdin is not writable");
+      throw this.transportCloseError || new Error("Codex process stdin is not writable");
     }
     this.child.stdin.write(`${payload}\n`);
+  }
+
+  handleTransportClosed(error) {
+    if (this.transportCloseError) {
+      return;
+    }
+
+    this.isReady = false;
+    this.transportCloseError = error;
+
+    for (const { reject } of this.pending.values()) {
+      reject(error);
+    }
+    this.pending.clear();
+
+    for (const listener of this.transportCloseListeners) {
+      listener(error);
+    }
   }
 
   handleIncoming(rawMessage) {
