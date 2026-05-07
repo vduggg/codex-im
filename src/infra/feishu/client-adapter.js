@@ -166,6 +166,44 @@ class FeishuClientAdapter {
       mimeType: extractContentType(response),
     };
   }
+
+  async downloadFileByKey({ messageId, fileKey }) {
+    const normalizedFileKey = normalizeIdentifier(fileKey);
+    if (!normalizedFileKey) {
+      throw new Error("fileKey is required");
+    }
+
+    const getMessageResource = resolveGetMessageResourceMethod(this.client);
+    const normalizedMessageId = normalizeMessageId(messageId);
+    if (!normalizedMessageId) {
+      throw new Error("messageId is required");
+    }
+    if (typeof getMessageResource !== "function") {
+      throw new Error("Unsupported Feishu SDK shape: missing messageResource.get");
+    }
+
+    const response = await getMessageResource.call(
+      this.client.im?.v1?.messageResource || this.client.im?.messageResource || this.client,
+      {
+        params: {
+          type: "file",
+        },
+        path: {
+          message_id: normalizedMessageId,
+          file_key: normalizedFileKey,
+        },
+      }
+    );
+
+    const buffer = await extractBinaryBuffer(response);
+    if (!buffer.length) {
+      throw new Error("Feishu file download returned empty data");
+    }
+    return {
+      buffer,
+      mimeType: extractContentType(response),
+    };
+  }
 }
 
 function resolveCreateMessageMethod(client) {
