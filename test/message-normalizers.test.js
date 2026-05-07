@@ -35,6 +35,7 @@ test("normalizes pure text messages without changing command parsing", () => {
   assert.equal(normalized.text, "/codex bind /tmp/project");
   assert.equal(normalized.command, "bind");
   assert.deepEqual(normalized.images, []);
+  assert.deepEqual(normalized.files, []);
 });
 
 test("marks pure image messages as image_only", () => {
@@ -57,6 +58,7 @@ test("marks pure image messages as image_only", () => {
       sourceType: "image",
     },
   ]);
+  assert.deepEqual(normalized.files, []);
 });
 
 test("normalizes post messages with both text and image tags", () => {
@@ -89,6 +91,7 @@ test("normalizes post messages with both text and image tags", () => {
       sourceType: "post",
     },
   ]);
+  assert.deepEqual(normalized.files, []);
 });
 
 test("normalizes top-level post messages with both text and image tags", () => {
@@ -123,4 +126,48 @@ test("normalizes top-level post messages with both text and image tags", () => {
       sourceType: "post",
     },
   ]);
+  assert.deepEqual(normalized.files, []);
+});
+
+test("normalizes file messages as file_only", () => {
+  const normalized = normalizeFeishuTextEvent({
+    message: {
+      message_type: "file",
+      content: JSON.stringify({
+        file_key: "file_v3_test",
+        file_name: "build.log",
+      }),
+      chat_id: "oc_file",
+      message_id: "om_file",
+    },
+    sender: buildSender(),
+  }, buildConfig());
+
+  assert.equal(normalized.messageType, "file_only");
+  assert.equal(normalized.text, "");
+  assert.equal(normalized.command, "");
+  assert.deepEqual(normalized.images, []);
+  assert.deepEqual(normalized.files, [
+    {
+      fileKey: "file_v3_test",
+      fileName: "build.log",
+      sourceType: "file",
+    },
+  ]);
+});
+
+test("ignores malformed file messages without file_key", () => {
+  const normalized = normalizeFeishuTextEvent({
+    message: {
+      message_type: "file",
+      content: JSON.stringify({
+        file_name: "build.log",
+      }),
+      chat_id: "oc_file_bad",
+      message_id: "om_file_bad",
+    },
+    sender: buildSender(),
+  }, buildConfig());
+
+  assert.equal(normalized, null);
 });

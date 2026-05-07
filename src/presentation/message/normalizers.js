@@ -17,6 +17,7 @@ function normalizeFeishuTextEvent(event, config) {
     messageId: message.message_id || "",
     text: normalizedContent.text,
     images: normalizedContent.images,
+    files: normalizedContent.files,
     messageType: normalizedContent.messageType,
     command: parseCommand(normalizedContent.text),
     receivedAt: new Date().toISOString(),
@@ -91,6 +92,7 @@ function normalizeCardActionContext(data, config) {
     messageId,
     text: "",
     images: [],
+    files: [],
     messageType: "card_action",
     command: "",
     receivedAt: new Date().toISOString(),
@@ -120,6 +122,7 @@ function normalizeIncomingFeishuMessage(message) {
     return {
       text,
       images: [],
+      files: [],
       messageType: "text",
     };
   }
@@ -137,7 +140,21 @@ function normalizeIncomingFeishuMessage(message) {
           sourceType: "image",
         },
       ],
+      files: [],
       messageType: "image_only",
+    };
+  }
+
+  if (messageType === "file") {
+    const file = parseFeishuMessageFile(message.content);
+    if (!file) {
+      return null;
+    }
+    return {
+      text: "",
+      images: [],
+      files: [file],
+      messageType: "file_only",
     };
   }
 
@@ -158,6 +175,23 @@ function parseFeishuMessageImageKey(rawContent) {
     return normalizeIdentifier(parsed?.image_key);
   } catch {
     return "";
+  }
+}
+
+function parseFeishuMessageFile(rawContent) {
+  try {
+    const parsed = JSON.parse(rawContent || "{}");
+    const fileKey = normalizeIdentifier(parsed?.file_key);
+    if (!fileKey) {
+      return null;
+    }
+    return {
+      fileKey,
+      fileName: normalizeIdentifier(parsed?.file_name) || "file",
+      sourceType: "file",
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -189,6 +223,7 @@ function parseFeishuPostMessage(rawContent) {
     return {
       text,
       images,
+      files: [],
       messageType: text && images.length ? "mixed" : (images.length ? "image_only" : "text"),
     };
   } catch {

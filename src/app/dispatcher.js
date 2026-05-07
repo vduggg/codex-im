@@ -19,6 +19,7 @@ async function onFeishuTextEvent(runtime, event) {
     chatId: normalized.chatId,
     textLength: normalized.text.length,
     imageCount: normalized.images.length,
+    fileCount: Array.isArray(normalized.files) ? normalized.files.length : 0,
     command: normalized.command,
   });
 
