@@ -36,7 +36,7 @@ im.message.reaction.deleted_v1
 card.action.trigger
 ```
 
-管理员在权限管理中开通这些权限。该仓库文档列出的权限覆盖消息接收、发消息、图片资源、表情、卡片读取和卡片更新。
+管理员在权限管理中开通这些权限。该仓库文档列出的权限覆盖消息接收、发消息、图片和文件资源、表情、卡片读取和卡片更新。
 
 ```text
 cardkit:card:read
@@ -62,6 +62,8 @@ codex-im feishu-bot
 ```text
 /codex bind /absolute/project/dir
 ```
+
+绑定项目后，用户从飞书发送给机器人的文件会被下载到当前绑定项目下的 `.codex-im/inbox/`，随后程序把保存后的相对路径交给 Codex 继续处理。
 
 常用查看命令如下。第一个命令查看当前绑定信息。第二个命令新建线程。第三个命令查看可用模型。第四个命令查看帮助。
 
