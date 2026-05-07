@@ -69,6 +69,7 @@ test("sends mixed feishu input with temporary image paths and cleans them afterw
     normalized: {
       text: "请描述这张图",
       images: [{ imageKey: "img_post" }],
+      files: [],
       messageType: "mixed",
     },
     threadId: "thread_existing",
@@ -123,6 +124,7 @@ test("keeps pure text sends on the old path", async () => {
     normalized: {
       text: "/codex where",
       images: [],
+      files: [],
       messageType: "text",
     },
     threadId: "thread_text",

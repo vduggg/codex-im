@@ -43,6 +43,10 @@ const {
   cleanupTempFiles,
   downloadMessageImagesToTemp,
 } = require("../infra/feishu/image-resource-service");
+const {
+  cleanupInboxFiles,
+  saveMessageFilesToWorkspaceInbox,
+} = require("../infra/feishu/file-resource-service");
 const runtimeCommands = require("./command-dispatcher");
 const approvalRuntime = require("../domain/approval/approval-service");
 const runtimeState = require("../domain/session/binding-context");
@@ -249,6 +253,8 @@ function attachRuntimeForwarders() {
     listBoundWorkspaces,
     downloadMessageImagesToTemp,
     cleanupTempFiles,
+    saveMessageFilesToWorkspaceInbox,
+    cleanupInboxFiles,
   };
 
   for (const [methodName, fn] of Object.entries(plainForwarders)) {

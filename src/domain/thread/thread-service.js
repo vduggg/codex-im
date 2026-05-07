@@ -101,11 +101,13 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
 
 async function sendNormalizedMessageToCodex(runtime, { threadId, normalized, codexParams, workspaceRoot }) {
   const tempImageFiles = await prepareTempImageFiles(runtime, normalized);
+  const savedInboxFiles = await prepareWorkspaceInboxFiles(runtime, workspaceRoot, normalized);
+  const finalText = buildTextWithInboundFiles(normalized?.text || "", savedInboxFiles);
 
   try {
     const response = await runtime.codex.sendUserMessage({
       threadId,
-      text: normalized.text,
+      text: finalText,
       imagePaths: tempImageFiles.map((file) => file.path),
       model: codexParams.model || null,
       effort: codexParams.effort || null,
@@ -147,6 +149,35 @@ async function prepareTempImageFiles(runtime, normalized) {
     messageId: normalized?.messageId || "",
     images,
   });
+}
+
+async function prepareWorkspaceInboxFiles(runtime, workspaceRoot, normalized) {
+  const files = Array.isArray(normalized?.files) ? normalized.files : [];
+  if (!files.length) {
+    return [];
+  }
+  return runtime.saveMessageFilesToWorkspaceInbox(runtime.requireFeishuAdapter(), {
+    messageId: normalized?.messageId || "",
+    workspaceRoot,
+    files,
+  });
+}
+
+function buildTextWithInboundFiles(text, savedFiles) {
+  const baseText = typeof text === "string" ? text.trim() : "";
+  const normalizedSavedFiles = Array.isArray(savedFiles) ? savedFiles : [];
+  if (!normalizedSavedFiles.length) {
+    return baseText;
+  }
+
+  const suffix = normalizedSavedFiles.length > 1 ? "它们" : "它";
+  const prefix = baseText ? "用户还上传了" : "用户上传了";
+  const fileLines = normalizedSavedFiles
+    .map((file) => typeof file?.relativePath === "string" ? file.relativePath.trim() : "")
+    .filter(Boolean)
+    .map((relativePath) => `- ${relativePath}`);
+  const notice = `${prefix} ${normalizedSavedFiles.length} 个文件，请先读取${suffix}，再继续回答：\n${fileLines.join("\n")}`;
+  return baseText ? `${baseText}\n\n${notice}` : notice;
 }
 
 async function createWorkspaceThread(runtime, { bindingKey, workspaceRoot, normalized }) {
