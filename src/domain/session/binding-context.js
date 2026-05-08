@@ -58,6 +58,131 @@ function setPendingThreadContext(runtime, threadId, normalized) {
   );
 }
 
+function setPendingTempImageFiles(runtime, threadId, turnId, files) {
+  if (!threadId) {
+    return;
+  }
+
+  let normalizedTurnId = normalizeTurnId(turnId);
+  let sourceFiles = files;
+  if (Array.isArray(turnId) && files === undefined) {
+    normalizedTurnId = "";
+    sourceFiles = turnId;
+  }
+
+  const normalizedFiles = Array.isArray(sourceFiles) ? sourceFiles.filter(Boolean) : [];
+  if (!normalizedFiles.length) {
+    removePendingTempImageEntry(runtime, threadId, normalizedTurnId);
+    return;
+  }
+
+  const entries = getPendingTempImageEntries(runtime, threadId);
+  const existingIndex = findPendingTempImageEntryIndex(entries, normalizedTurnId);
+  const entry = {
+    turnId: normalizedTurnId,
+    files: normalizedFiles,
+  };
+  if (existingIndex >= 0) {
+    entries[existingIndex] = entry;
+  } else {
+    entries.push(entry);
+  }
+
+  setBoundedMapEntry(
+    runtime,
+    runtime.pendingTempImageFilesByThreadId,
+    threadId,
+    entries,
+    MAX_THREAD_CONTEXT_CACHE_ENTRIES
+  );
+}
+
+async function cleanupPendingTempImageFiles(runtime, threadId, turnId = "") {
+  if (!threadId) {
+    return;
+  }
+
+  const files = removePendingTempImageEntry(runtime, threadId, normalizeTurnId(turnId));
+  if (!files.length) {
+    return;
+  }
+  await runtime.cleanupTempFiles(files);
+}
+
+function getPendingTempImageEntries(runtime, threadId) {
+  const current = runtime.pendingTempImageFilesByThreadId.get(threadId);
+  if (!Array.isArray(current)) {
+    return [];
+  }
+
+  const entries = [];
+  const legacyFiles = [];
+  for (const entry of current) {
+    if (entry && typeof entry === "object" && Array.isArray(entry.files)) {
+      const files = entry.files.filter(Boolean);
+      if (files.length) {
+        entries.push({
+          turnId: normalizeTurnId(entry.turnId),
+          files,
+        });
+      }
+      continue;
+    }
+    if (entry) {
+      legacyFiles.push(entry);
+    }
+  }
+
+  if (legacyFiles.length) {
+    entries.unshift({
+      turnId: "",
+      files: legacyFiles,
+    });
+  }
+  return entries;
+}
+
+function findPendingTempImageEntryIndex(entries, turnId) {
+  if (!Array.isArray(entries) || !entries.length) {
+    return -1;
+  }
+
+  const normalizedTurnId = normalizeTurnId(turnId);
+  if (normalizedTurnId) {
+    const exactIndex = entries.findIndex((entry) => entry.turnId === normalizedTurnId);
+    if (exactIndex >= 0) {
+      return exactIndex;
+    }
+    return entries.findIndex((entry) => !entry.turnId);
+  }
+
+  const untaggedIndex = entries.findIndex((entry) => !entry.turnId);
+  if (untaggedIndex >= 0) {
+    return untaggedIndex;
+  }
+  return entries.length === 1 ? 0 : -1;
+}
+
+function removePendingTempImageEntry(runtime, threadId, turnId) {
+  const entries = getPendingTempImageEntries(runtime, threadId);
+  const entryIndex = findPendingTempImageEntryIndex(entries, turnId);
+  if (entryIndex < 0) {
+    return [];
+  }
+
+  const [removed] = entries.splice(entryIndex, 1);
+  if (entries.length) {
+    runtime.pendingTempImageFilesByThreadId.set(threadId, entries);
+  } else {
+    runtime.pendingTempImageFilesByThreadId.delete(threadId);
+  }
+  return removed?.files || [];
+}
+
+function normalizeTurnId(turnId) {
+  return typeof turnId === "string" && turnId.trim() ? turnId.trim() : "";
+}
+
 function setReplyCardEntry(runtime, runKey, entry) {
   if (!runKey || !entry) {
     return;
@@ -181,6 +306,7 @@ function pruneMapToLimit(map, limit) {
 }
 
 module.exports = {
+  cleanupPendingTempImageFiles,
   cleanupThreadRuntimeState,
   pruneRuntimeMapSizes,
   resolveThreadIdForBinding,
@@ -188,6 +314,7 @@ module.exports = {
   resolveWorkspaceRootForThread,
   setCurrentRunKeyForThread,
   setPendingBindingContext,
+  setPendingTempImageFiles,
   setPendingThreadContext,
   setReplyCardEntry,
   setThreadBindingKey,

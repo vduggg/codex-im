@@ -50,12 +50,10 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
       normalized,
     });
     console.log(`[codex-im] turn/start first message thread=${createdThreadId}`);
-    await runtime.codex.sendUserMessage({
+    await sendNormalizedMessageToCodex(runtime, {
       threadId: createdThreadId,
-      text: normalized.text,
-      model: codexParams.model || null,
-      effort: codexParams.effort || null,
-      accessMode: runtime.config.defaultCodexAccessMode,
+      normalized,
+      codexParams,
       workspaceRoot,
     });
     runtime.setThreadBindingKey(createdThreadId, bindingKey);
@@ -65,12 +63,10 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
 
   try {
     await ensureThreadResumed(runtime, threadId);
-    await runtime.codex.sendUserMessage({
+    await sendNormalizedMessageToCodex(runtime, {
       threadId,
-      text: normalized.text,
-      model: codexParams.model || null,
-      effort: codexParams.effort || null,
-      accessMode: runtime.config.defaultCodexAccessMode,
+      normalized,
+      codexParams,
       workspaceRoot,
     });
     console.log(`[codex-im] turn/start ok workspace=${workspaceRoot} thread=${threadId}`);
@@ -91,18 +87,97 @@ async function ensureThreadAndSendMessage(runtime, { bindingKey, workspaceRoot, 
       normalized,
     });
     console.log(`[codex-im] turn/start retry thread=${recreatedThreadId}`);
-    await runtime.codex.sendUserMessage({
+    await sendNormalizedMessageToCodex(runtime, {
       threadId: recreatedThreadId,
-      text: normalized.text,
-      model: codexParams.model || null,
-      effort: codexParams.effort || null,
-      accessMode: runtime.config.defaultCodexAccessMode,
+      normalized,
+      codexParams,
       workspaceRoot,
     });
     runtime.setThreadBindingKey(recreatedThreadId, bindingKey);
     runtime.setThreadWorkspaceRoot(recreatedThreadId, workspaceRoot);
     return recreatedThreadId;
   }
+}
+
+async function sendNormalizedMessageToCodex(runtime, { threadId, normalized, codexParams, workspaceRoot }) {
+  const tempImageFiles = await prepareTempImageFiles(runtime, normalized);
+  const savedInboxFiles = await prepareWorkspaceInboxFiles(runtime, workspaceRoot, normalized);
+  const finalText = buildTextWithInboundFiles(normalized?.text || "", savedInboxFiles);
+
+  try {
+    const response = await runtime.codex.sendUserMessage({
+      threadId,
+      text: finalText,
+      imagePaths: tempImageFiles.map((file) => file.path),
+      model: codexParams.model || null,
+      effort: codexParams.effort || null,
+      accessMode: runtime.config.defaultCodexAccessMode,
+      workspaceRoot,
+    });
+    if (tempImageFiles.length) {
+      runtime.setPendingTempImageFiles(threadId, extractStartedTurnId(response), tempImageFiles);
+    }
+  } catch (error) {
+    if (tempImageFiles.length) {
+      await runtime.cleanupTempFiles(tempImageFiles);
+    }
+    throw error;
+  }
+}
+
+function extractStartedTurnId(response) {
+  const candidates = [
+    response?.result?.turn?.id,
+    response?.result?.turnId,
+    response?.turn?.id,
+    response?.turnId,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+async function prepareTempImageFiles(runtime, normalized) {
+  const images = Array.isArray(normalized?.images) ? normalized.images : [];
+  if (!images.length) {
+    return [];
+  }
+  return runtime.downloadMessageImagesToTemp(runtime.requireFeishuAdapter(), {
+    messageId: normalized?.messageId || "",
+    images,
+  });
+}
+
+async function prepareWorkspaceInboxFiles(runtime, workspaceRoot, normalized) {
+  const files = Array.isArray(normalized?.files) ? normalized.files : [];
+  if (!files.length) {
+    return [];
+  }
+  return runtime.saveMessageFilesToWorkspaceInbox(runtime.requireFeishuAdapter(), {
+    messageId: normalized?.messageId || "",
+    workspaceRoot,
+    files,
+  });
+}
+
+function buildTextWithInboundFiles(text, savedFiles) {
+  const baseText = typeof text === "string" ? text.trim() : "";
+  const normalizedSavedFiles = Array.isArray(savedFiles) ? savedFiles : [];
+  if (!normalizedSavedFiles.length) {
+    return baseText;
+  }
+
+  const suffix = normalizedSavedFiles.length > 1 ? "它们" : "它";
+  const prefix = baseText ? "用户还上传了" : "用户上传了";
+  const fileLines = normalizedSavedFiles
+    .map((file) => typeof file?.relativePath === "string" ? file.relativePath.trim() : "")
+    .filter(Boolean)
+    .map((relativePath) => `- ${relativePath}`);
+  const notice = `${prefix} ${normalizedSavedFiles.length} 个文件，请先读取${suffix}，再继续回答：\n${fileLines.join("\n")}`;
+  return baseText ? `${baseText}\n\n${notice}` : notice;
 }
 
 async function createWorkspaceThread(runtime, { bindingKey, workspaceRoot, normalized }) {

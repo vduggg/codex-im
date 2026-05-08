@@ -39,6 +39,14 @@ const {
   FeishuClientAdapter,
   patchWsClientForCardCallbacks,
 } = require("../infra/feishu/client-adapter");
+const {
+  cleanupTempFiles,
+  downloadMessageImagesToTemp,
+} = require("../infra/feishu/image-resource-service");
+const {
+  cleanupInboxFiles,
+  saveMessageFilesToWorkspaceInbox,
+} = require("../infra/feishu/file-resource-service");
 const runtimeCommands = require("./command-dispatcher");
 const approvalRuntime = require("../domain/approval/approval-service");
 const runtimeState = require("../domain/session/binding-context");
@@ -69,6 +77,7 @@ class FeishuBotRuntime {
     this.pendingApprovalByThreadId = new Map();
     this.replyCardByRunKey = new Map();
     this.currentRunKeyByThreadId = new Map();
+    this.pendingTempImageFilesByThreadId = new Map();
     this.replyFlushTimersByRunKey = new Map();
     this.pendingReactionByBindingKey = new Map();
     this.pendingReactionByThreadId = new Map();
@@ -78,6 +87,10 @@ class FeishuBotRuntime {
     this.inFlightApprovalRequestKeys = new Set();
     this.resumedThreadIds = new Set();
     this.codex.onMessage((message) => appDispatcher.onCodexMessage(this, message));
+    this.codex.onTransportClosed((error) => {
+      console.error(`[codex-im] fatal codex transport failure: ${error.message}`);
+      setTimeout(() => process.exit(1), 0);
+    });
   }
 
   async start() {
@@ -143,6 +156,14 @@ class FeishuBotRuntime {
   startLongConnection() {
     const eventDispatcher = new this.lark.EventDispatcher({}).register({
       "im.message.receive_v1": async (data) => {
+        console.log("[codex-im] feishu event received", {
+          messageType: data?.message?.message_type || "",
+          messageId: data?.message?.message_id || "",
+          chatId: data?.message?.chat_id || "",
+          rootId: data?.message?.root_id || "",
+          hasContent: typeof data?.message?.content === "string" && data.message.content.length > 0,
+          contentPreview: String(data?.message?.content || "").slice(0, 300),
+        });
         appDispatcher.onFeishuTextEvent(this, data).catch((error) => {
           console.error(`[codex-im] failed to process Feishu message: ${error.message}`);
         });
@@ -230,6 +251,10 @@ function attachRuntimeForwarders() {
     buildThreadPickerCard,
     buildWorkspaceBindingsCard,
     listBoundWorkspaces,
+    downloadMessageImagesToTemp,
+    cleanupTempFiles,
+    saveMessageFilesToWorkspaceInbox,
+    cleanupInboxFiles,
   };
 
   for (const [methodName, fn] of Object.entries(plainForwarders)) {
@@ -249,6 +274,7 @@ function attachRuntimeForwarders() {
     setThreadBindingKey: runtimeState.setThreadBindingKey,
     setThreadWorkspaceRoot: runtimeState.setThreadWorkspaceRoot,
     setPendingBindingContext: runtimeState.setPendingBindingContext,
+    setPendingTempImageFiles: runtimeState.setPendingTempImageFiles,
     setPendingThreadContext: runtimeState.setPendingThreadContext,
     setReplyCardEntry: runtimeState.setReplyCardEntry,
     setCurrentRunKeyForThread: runtimeState.setCurrentRunKeyForThread,
@@ -299,6 +325,7 @@ function attachRuntimeForwarders() {
     movePendingReactionToThread,
     clearPendingReactionForBinding,
     clearPendingReactionForThread,
+    cleanupPendingTempImageFiles: runtimeState.cleanupPendingTempImageFiles,
     disposeReplyRunState,
     cleanupThreadRuntimeState: runtimeState.cleanupThreadRuntimeState,
     pruneRuntimeMapSizes: runtimeState.pruneRuntimeMapSizes,

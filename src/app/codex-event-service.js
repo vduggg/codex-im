@@ -39,18 +39,24 @@ function handleCodexMessage(runtime, message) {
   if (typeof message?.method === "string") {
     console.log(`[codex-im] codex event ${message.method}`);
   }
+  const shouldCleanupThreadState = isTerminalTurnMessage(message);
+  const terminalThreadId = typeof message?.params?.threadId === "string" ? message.params.threadId : "";
+  const terminalTurnId = shouldCleanupThreadState ? resolveTerminalTurnId(runtime, message, terminalThreadId) : "";
   codexMessageUtils.trackRunningTurn(runtime.activeTurnIdByThreadId, message);
   codexMessageUtils.trackPendingApproval(runtime.pendingApprovalByThreadId, message);
   codexMessageUtils.trackRunKeyState(runtime.currentRunKeyByThreadId, runtime.activeTurnIdByThreadId, message);
   runtime.pruneRuntimeMapSizes();
   const outbound = codexMessageUtils.mapCodexMessageToImEvent(message);
   if (!outbound) {
+    if (shouldCleanupThreadState && terminalThreadId) {
+      cleanupTerminalTurnState(runtime, terminalThreadId, terminalTurnId);
+    }
     return;
   }
 
   const threadId = outbound.payload?.threadId || "";
   if (!outbound.payload.turnId) {
-    outbound.payload.turnId = runtime.activeTurnIdByThreadId.get(threadId) || "";
+    outbound.payload.turnId = terminalTurnId || runtime.activeTurnIdByThreadId.get(threadId) || "";
   }
   const context = runtime.pendingChatContextByThreadId.get(threadId);
   if (context) {
@@ -64,7 +70,6 @@ function handleCodexMessage(runtime, message) {
     });
   }
 
-  const shouldCleanupThreadState = isTerminalTurnMessage(message);
   runtime.deliverToFeishu(outbound)
     .catch((error) => {
       console.error(`[codex-im] failed to deliver Feishu message: ${error.message}`);
@@ -73,10 +78,7 @@ function handleCodexMessage(runtime, message) {
       if (!shouldCleanupThreadState || !threadId) {
         return;
       }
-      runtime.clearPendingReactionForThread(threadId).catch((error) => {
-        console.error(`[codex-im] failed to clear pending reaction: ${error.message}`);
-      });
-      runtime.cleanupThreadRuntimeState(threadId);
+      cleanupTerminalTurnState(runtime, threadId, outbound.payload?.turnId || terminalTurnId);
     });
 }
 
@@ -149,6 +151,36 @@ async function deliverToFeishu(runtime, event) {
 function isTerminalTurnMessage(message) {
   const method = typeof message?.method === "string" ? message.method : "";
   return method === "turn/completed" || method === "turn/failed" || method === "turn/cancelled";
+}
+
+function resolveTerminalTurnId(runtime, message, threadId) {
+  const candidates = [
+    message?.params?.turn?.id,
+    message?.params?.turnId,
+    threadId ? runtime.activeTurnIdByThreadId.get(threadId) : "",
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+function cleanupTerminalTurnState(runtime, threadId, turnId = "") {
+  return Promise.allSettled([
+    runtime.clearPendingReactionForThread(threadId),
+    runtime.cleanupPendingTempImageFiles(threadId, turnId),
+  ]).then((results) => {
+    const [reactionResult, imageResult] = results;
+    if (reactionResult?.status === "rejected") {
+      console.error(`[codex-im] failed to clear pending reaction: ${reactionResult.reason?.message || reactionResult.reason}`);
+    }
+    if (imageResult?.status === "rejected") {
+      console.error(`[codex-im] failed to cleanup temp images: ${imageResult.reason?.message || imageResult.reason}`);
+    }
+    runtime.cleanupThreadRuntimeState(threadId);
+  });
 }
 
 module.exports = {

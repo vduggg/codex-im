@@ -3,12 +3,8 @@ const codexMessageUtils = require("../../infra/codex/message-utils");
 function normalizeFeishuTextEvent(event, config) {
   const message = event?.message || {};
   const sender = event?.sender || {};
-  if (message.message_type !== "text") {
-    return null;
-  }
-
-  const text = parseFeishuMessageText(message.content);
-  if (!text) {
+  const normalizedContent = normalizeIncomingFeishuMessage(message);
+  if (!normalizedContent) {
     return null;
   }
 
@@ -19,8 +15,11 @@ function normalizeFeishuTextEvent(event, config) {
     threadKey: message.root_id || "",
     senderId: sender?.sender_id?.open_id || sender?.sender_id?.user_id || "",
     messageId: message.message_id || "",
-    text,
-    command: parseCommand(text),
+    text: normalizedContent.text,
+    images: normalizedContent.images,
+    files: normalizedContent.files,
+    messageType: normalizedContent.messageType,
+    command: parseCommand(normalizedContent.text),
     receivedAt: new Date().toISOString(),
   };
 }
@@ -92,6 +91,9 @@ function normalizeCardActionContext(data, config) {
     senderId,
     messageId,
     text: "",
+    images: [],
+    files: [],
+    messageType: "card_action",
     command: "",
     receivedAt: new Date().toISOString(),
   };
@@ -108,6 +110,187 @@ function parseFeishuMessageText(rawContent) {
   } catch {
     return "";
   }
+}
+
+function normalizeIncomingFeishuMessage(message) {
+  const messageType = normalizeIdentifier(message?.message_type).toLowerCase();
+  if (messageType === "text") {
+    const text = parseFeishuMessageText(message.content);
+    if (!text) {
+      return null;
+    }
+    return {
+      text,
+      images: [],
+      files: [],
+      messageType: "text",
+    };
+  }
+
+  if (messageType === "image") {
+    const imageKey = parseFeishuMessageImageKey(message.content);
+    if (!imageKey) {
+      return null;
+    }
+    return {
+      text: "",
+      images: [
+        {
+          imageKey,
+          sourceType: "image",
+        },
+      ],
+      files: [],
+      messageType: "image_only",
+    };
+  }
+
+  if (messageType === "file") {
+    const file = parseFeishuMessageFile(message.content);
+    if (!file) {
+      return null;
+    }
+    return {
+      text: "",
+      images: [],
+      files: [file],
+      messageType: "file_only",
+    };
+  }
+
+  if (messageType === "post") {
+    const parsedPost = parseFeishuPostMessage(message.content);
+    if (!parsedPost) {
+      return null;
+    }
+    return parsedPost;
+  }
+
+  return null;
+}
+
+function parseFeishuMessageImageKey(rawContent) {
+  try {
+    const parsed = JSON.parse(rawContent || "{}");
+    return normalizeIdentifier(parsed?.image_key);
+  } catch {
+    return "";
+  }
+}
+
+function parseFeishuMessageFile(rawContent) {
+  try {
+    const parsed = JSON.parse(rawContent || "{}");
+    const fileKey = normalizeIdentifier(parsed?.file_key);
+    if (!fileKey) {
+      return null;
+    }
+    return {
+      fileKey,
+      fileName: normalizeIdentifier(parsed?.file_name) || "file",
+      sourceType: "file",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseFeishuPostMessage(rawContent) {
+  try {
+    const parsed = JSON.parse(rawContent || "{}");
+    const postBody = pickPostBody(parsed);
+    if (!postBody) {
+      return null;
+    }
+
+    const images = [];
+    const textSegments = [];
+    const contentBlocks = Array.isArray(postBody.content) ? postBody.content : [];
+    for (const block of contentBlocks) {
+      const blockResult = extractPostBlock(block);
+      if (blockResult.text) {
+        textSegments.push(blockResult.text);
+      }
+      if (blockResult.images.length) {
+        images.push(...blockResult.images);
+      }
+    }
+
+    const text = normalizePostText(textSegments.join("\n"));
+    if (!text && !images.length) {
+      return null;
+    }
+    return {
+      text,
+      images,
+      files: [],
+      messageType: text && images.length ? "mixed" : (images.length ? "image_only" : "text"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function pickPostBody(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  if (Array.isArray(parsed.content)) {
+    return parsed;
+  }
+  for (const value of Object.values(parsed)) {
+    if (value && typeof value === "object" && Array.isArray(value.content)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function extractPostBlock(block) {
+  const textSegments = [];
+  const images = [];
+  const items = Array.isArray(block) ? block : [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const tag = normalizeIdentifier(item.tag).toLowerCase();
+    if (tag === "text" || tag === "a") {
+      const text = normalizePostText(item.text);
+      if (text) {
+        textSegments.push(text);
+      }
+      continue;
+    }
+    if (tag === "at") {
+      const userName = normalizePostText(item.user_name);
+      if (userName) {
+        textSegments.push(`@${userName}`);
+      }
+      continue;
+    }
+    if (tag === "img") {
+      const imageKey = normalizeIdentifier(item.image_key);
+      if (imageKey) {
+        images.push({
+          imageKey,
+          sourceType: "post",
+        });
+      }
+    }
+  }
+  return {
+    text: normalizePostText(textSegments.join("")),
+    images,
+  };
+}
+
+function normalizePostText(value) {
+  return String(value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
 }
 
 function parseCommand(text) {

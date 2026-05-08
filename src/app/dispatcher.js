@@ -5,10 +5,25 @@ const { formatFailureText } = require("../shared/error-text");
 async function onFeishuTextEvent(runtime, event) {
   const normalized = messageNormalizers.normalizeFeishuTextEvent(event, runtime.config);
   if (!normalized) {
+    console.warn("[codex-im] ignored feishu message during normalization", {
+      messageType: event?.message?.message_type || "",
+      messageId: event?.message?.message_id || "",
+      contentPreview: String(event?.message?.content || "").slice(0, 300),
+    });
     return;
   }
 
-  if (await runtime.dispatchTextCommand(normalized)) {
+  console.log("[codex-im] normalized feishu message", {
+    messageType: normalized.messageType,
+    messageId: normalized.messageId,
+    chatId: normalized.chatId,
+    textLength: normalized.text.length,
+    imageCount: normalized.images.length,
+    fileCount: Array.isArray(normalized.files) ? normalized.files.length : 0,
+    command: normalized.command,
+  });
+
+  if (!normalized.images.length && await runtime.dispatchTextCommand(normalized)) {
     return;
   }
 
